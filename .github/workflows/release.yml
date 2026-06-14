@@ -1,0 +1,30 @@
+name: Release AppImage
+
+# Build the AppImage and publish it to a GitHub Release whenever a vX.Y.Z tag
+# is pushed. Runs entirely on GitHub (uses the built-in GITHUB_TOKEN), so no
+# local gh/token is needed — just `git tag vX.Y.Z && git push origin vX.Y.Z`.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build AppImage
+        run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1   # no FUSE needed on the runner
+          bash packaging/build-appimage.sh
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AudioMixer-x86_64.AppImage
+          generate_release_notes: true
+          fail_on_unmatched_files: true

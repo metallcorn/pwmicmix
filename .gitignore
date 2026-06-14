@@ -16,3 +16,6 @@ build/
 .DS_Store
 *.swp
 *~
+
+# Local deploy key — NEVER commit a private key
+/.deploykey/

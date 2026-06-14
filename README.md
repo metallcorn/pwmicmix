@@ -1,250 +1,147 @@
-# AudioMixer
+<div align="center">
 
-Веб-пульт для **мониторинга и управления виртуальными микрофонами PipeWire** на
-Linux в реальном времени. Тёмная адаптивная тема (десктоп + телефон), интерфейс
-на английском.
+# 🎚️ AudioMixer
 
-Инструмент берёт каналы реальных аудиоустройств (например, отдельные USB-посылы
-пульта Behringer WING, встроенный микрофон или монитор колонок) и публикует каждый
-как самостоятельный **виртуальный микрофон** `Audio/Source`, который видят
-приложения (Chrome, OBS, Zoom, Meet…). Уровни, громкость, гейт, маршрутизация,
-mute, линковка и пресеты управляются на лету.
+### A web mixing console for PipeWire — turn any device channel into its own virtual microphone.
 
----
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux-333)](#requirements)
+[![PipeWire](https://img.shields.io/badge/audio-PipeWire-1abc9c)](https://pipewire.org)
+[![Latest release](https://img.shields.io/github/v/release/metallcorn/pwmicmix?label=download)](https://github.com/metallcorn/pwmicmix/releases/latest)
 
-## Возможности
+![AudioMixer console](screenshot.png)
 
-- **Виртуальные микрофоны** из любых портов реальных устройств (источники + мониторы sink'ов).
-- **VU-метры** в реальном времени (опрос 80 мс), логарифмическая dB-шкала, быстрая
-  атака / медленный спад, peak-hold, индикатор клиппинга.
-- **Фейдеры** с dB-ходом и запасом усиления **до +12 dB**, шкала делений; колесо мыши
-  по ховеру; кликабельное dB-значение (ввод с клавиатуры); под значением — итог
-  «с мастером».
-- **Mute** на каждом канале и **глобальный master-mute**.
-- **Noise gate** на каждый канал: маркер порога `▸` на шкале + крутилка **NG** (со
-  значением порога в dBFS). Шестерёнка открывает настройки: **Th / At / Hd / Rl / Hs**
-  (threshold / attack / hold / release / hysteresis) с хорошими дефолтами и опцией
-  «применить ко всем / связанным». Полноценный broadcast-гейт (hold не рубит на
-  паузах, release без щелчка).
-- **Линковка фейдеров** (цепочка) — двигать несколько каналов разом; **Align** —
-  привести группу к значению «якоря».
-- **Пресеты сцен** — кнопки с номерами в заголовке; сохраняют **всё** (gain, mute,
-  gate + параметры, master, линки); меню save / rename / reset / export / delete;
-  хранятся в localStorage **и** в `presets.json`; при загрузке фейдеры/гейт плавно
-  «доезжают» как на моторизованном пульте. Формат версионирован (обратная
-  совместимость).
-- **Хоткеи** (см. кнопку `?` в интерфейсе).
-- **Мастер-канал** — общий gain ко всем + суммарный VU + master-mute.
-- **Визард добавления каналов** с живым осциллографом (видно, где идёт сигнал).
-- **Управление на лету**: переназначение источника (⚙), удаление (✕),
-  переименование (двойной клик).
-- **Доступ с телефона** по сети с PIN-кодом; кнопка **QR** в топбаре показывает
-  QR-код с уже встроенным PIN (отсканировал — подключился), с переключателем
-  сетевого интерфейса (хотспот / Wi-Fi / кабель) и подписью «адрес · PIN».
-- **Устойчивость**: авто-восстановление маршрутизации при передёргивании USB;
-  виртуальные микрофоны **переживают перезапуск сервера** (приложения не теряют
-  устройство и не ловят шум).
-- **Тест-страница** `/test.html` — проверить микрофон прямо в Chrome.
+</div>
 
 ---
 
-## Требования
+AudioMixer takes individual channels of your real audio hardware — separate USB sends of a
+**Behringer WING**, a webcam mic, a speaker monitor — and publishes **each one as its own
+virtual microphone** (`Audio/Source`) that any app (Chrome, OBS, Zoom, Meet, Discord…) can
+pick from its input list. Control it from a dark, adaptive console in the browser, or from
+your **phone on the same network**.
 
-- Linux с **PipeWire** и утилитами: `pw-loopback`, `pw-link`, `pw-record`,
-  `pw-cli`, `pw-dump`.
-- Python 3.10+.
-- numpy (из системных пакетов через `--system-site-packages`), Flask и `qrcode`
-  (ставятся в venv).
+It runs as a single-file **AppImage** (a native desktop window) or straight from source.
 
-> На системе разработки захват уровней работает через `pw-record` — `parec`
-> отдавал пустой/битый поток. Создание и маршрутизация нод — только нативные `pw-*`.
+## ✨ Features
 
----
+- 🎙️ **Virtual mics** from any port of any device — sources *and* sink monitors.
+- 📊 **Real-time VU meters** — log dB scale, fast-attack/slow-release ballistics, peak-hold, clip indicator.
+- 🎚️ **dB faders** with up to **+12 dB boost**, scale ticks, mouse-wheel control, click-to-type the dB value.
+- 🔇 **Mute** + 🟡 **Solo** per channel, plus a global **master mute**. (Solo silences everyone else; it clears the channel's mute.)
+- 🚪 **Broadcast noise gate** per channel — threshold + attack / hold / release / hysteresis, with a settings popup and "apply to all / linked".
+- 🔗 **Link faders** (move several as one) and **Align** them to an anchor.
+- 🎬 **Scene presets** — snapshot the whole mix (gain, mute, solo, gate, master, links); motorized-fader glide on recall; stored locally and on disk.
+- 📱 **Phone access** — a **QR button** shows a code with the PIN baked in; scan and you're connected, with a network-interface picker.
+- 🖥️ **Native window** (AppImage) with proper taskbar icon on GNOME & KDE; **in-UI Quit / Restart** (no terminal needed) and a close-confirmation.
+- 🔍 **UI zoom** — `Ctrl +/−/0` or `Ctrl+wheel`, scales the whole console (great on 2K/4K).
+- ♻️ **Survives restarts** — the virtual mics keep running across a server restart/replug, so apps never drop the input or get noise.
+- ⌨️ **Keyboard-driven** — see the in-app `?` panel.
 
-## Запуск и доступ
+## 📦 Install (AppImage)
+
+Grab the latest `AudioMixer-x86_64.AppImage` from the
+**[Releases page](https://github.com/metallcorn/pwmicmix/releases/latest)**, then:
 
 ```bash
-./run.sh
+chmod +x AudioMixer-x86_64.AppImage
+./AudioMixer-x86_64.AppImage
 ```
 
-Поднимает сервер на `0.0.0.0:8723` и печатает баннер с адресами и PIN:
+No installation, nothing written to system dirs (settings live in `~/.config/AudioMixer`).
 
-```
-┌────────────────────────────────────────────┐
-│  AudioMixer is running                      │
-│  On this computer:  http://localhost:8723   │
-│  From your phone:   http://10.x.x.x:8723     │
-│  PIN for remote access:  0610               │
-└────────────────────────────────────────────┘
-```
+### Requirements
 
-- **localhost** — без пароля.
-- **по сети** (телефон в той же сети/хотспоте) — спросит **PIN** (новый при каждом запуске).
+| Need | Why |
+|------|-----|
+| Linux **x86_64** | the binary architecture |
+| glibc **≥ 2.34** | Ubuntu 22.04+ / Fedora 35+ / Debian 12+ / recent Arch/Mint |
+| **PipeWire** + its CLI tools | the app drives host `pw-record` / `pw-cli` / `pw-link` / `pw-loopback` / `pw-dump` (intentionally *not* bundled, so they match your daemon) |
+| A desktop session | X11 or Wayland |
 
-### Кнопки топбара
-
-| Кнопка | Действие |
-|--------|----------|
-| **+ Ch** | визард добавления каналов |
-| **▶ / ■** | включить / выключить все микрофоны (ноды убираются, каналы остаются) |
-| **Align** | привести связанную группу к значению «якоря» |
-| **QR** | QR-код для телефона со встроенным PIN + выбор сетевого интерфейса |
-| **?** | окно с горячими клавишами |
-| **🗑** | удалить все каналы (с модалкой-предупреждением) |
-| **⏻** | остановить сервер/UI — **микрофоны продолжают работать** (бесшумный рестарт) |
-
-### Управление каналом
-
-- **Фейдер** — громкость; колесо мыши по ховеру; клик по dB — ввод значения.
-- **Маркер `▸` на VU / крутилка NG / шестерёнка** — noise gate и его настройки.
-- **Цепочка** (внизу) — линковать фейдеры; **M** — mute.
-- **⚙ / ✕** (сверху) — переназначить источник / удалить канал; двойной клик по имени — переименовать.
-
-### Горячие клавиши
-
-| Клавиши | Действие |
-|---|---|
-| `Alt`+`1…9` / `Alt`+`0` | выбрать канал / мастер |
-| `←` `→` | переключение канала |
-| `↑` `↓` (`Shift` — крупно) | громкость |
-| `[` `]` | порог noise gate выбранного |
-| `M` / `Alt`+`M` / `Ctrl`+`Alt`+`M` | mute канала / группы / мастер (всё) |
-| `L` / `Alt`+`L` | линк выбранного / снять все линки |
-| `N` | выровнять связанную группу |
-| `1…9` | вызвать пресет/сцену |
-
-### Что нужно после правок
-
-- Изменения в `static/*` (UI) → **жёсткий refresh** браузера (`Ctrl+Shift+R`).
-- Изменения в `*.py` → **разовый рестарт** сервера.
-
----
-
-## Распространение (AppImage)
+10-second check on a target machine:
 
 ```bash
-bash packaging/build-appimage.sh     # → AudioMixer-x86_64.AppImage (~202 МБ)
+ldd --version | head -1        # ≥ 2.34
+which pw-record pw-cli pw-link  # all found
 ```
 
-Один файл, ничего не ставится в систему. Внутри — портативный Python + Flask +
-**Qt WebEngine**: приложение открывается **в своём нативном окне** (своя иконка на
-панели задач, GNOME и KDE), а не во вкладке браузера. PipeWire-утилиты (`pw-*`)
-берутся **хостовые** (должны совпадать с запущенным демоном) — не бандлятся.
+> No FUSE? Run it as `./AudioMixer-x86_64.AppImage --appimage-extract-and-run`.
 
-- **Закрыл окно → приложение вышло** (фоновая служба не висит). Лёгкие
-  виртуальные микрофоны при этом остаются жить, чтобы Chrome/Zoom не теряли вход;
-  полностью убрать их — ⏹ Stop / 🗑 Clear в интерфейсе.
-- **⟳ Restart / ⏻ Quit** в топбаре — перезапуск и выход без терминала.
-- **Порт 8723**, занят → берётся соседний автоматически.
-- **Single-instance**: повторный запуск иконки не плодит второй сервер, а
-  открывает окно к уже работающему.
-- Настройки (`state.json`/`presets.json`) пишутся в `~/.config/AudioMixer`.
-
-> Сборка качает портативный CPython и `appimagetool`. `NO_QT_TRIM=1` — не обрезать
-> Qt; `APPIMAGE_EXTRACT_AND_RUN=1` — если FUSE капризничает у appimagetool.
-
----
-
-## Тесты
+## 🛠️ Run from source
 
 ```bash
-.venv/bin/python test_app.py     # лучше с остановленным сервером
+git clone git@github.com:metallcorn/pwmicmix.git
+cd pwmicmix
+./run.sh            # creates a venv, installs Flask + qrcode, starts the server
 ```
 
-Прогоняет функционально (на живом PipeWire, через Flask test-client, без порта):
-- **controls** — эндпоинты реально меняют громкость ноды (volume / mute /
-  master / master-mute / gate-огибающая / персист / пресеты / удаление);
-- **gate** — динамика реального `_gate_loop`: порог, attack, hold, release,
-  гистерезис, анти-дребезг.
+Then open **http://localhost:8723**. localhost is trusted (no PIN); remote devices use the
+4-digit **PIN** printed in the startup banner.
 
-Персист в тесте перенаправлен на временные файлы — твои `state.json`/`presets.json`
-не трогаются; создаётся и удаляётся один временный канал.
+## 🎛️ Using it
 
----
+**Topbar:** `+ Ch` add channel · `▶ / ■` start/stop all mics · `Align` · `QR` connect a phone ·
+`?` shortcuts · `🗑` remove all · `⟳` restart · `⏻` quit.
 
-## Как это устроено (архитектура)
+**Per channel:** drag the fader (wheel / click-dB to type) · the `▸` marker or `NG` knob +
+gear set the noise gate · `S` solo · `M` mute · chain icon links faders · `⚙ / ✕` (top)
+reassign source / remove · double-click the name to rename.
+
+### Keyboard shortcuts
+
+| Keys | Action |
+|------|--------|
+| `Alt`+`1…9` / `Alt`+`0` | select channel / master |
+| `←` `→` | switch channel |
+| `↑` `↓` (`Shift` = big step) | volume |
+| `[` `]` | noise-gate threshold |
+| `M` / `Alt`+`M` / `Ctrl`+`Alt`+`M` | mute channel / link group / master |
+| `S` / `Alt`+`S` | solo channel / link group |
+| `L` / `Alt`+`L` | link selected / unlink all |
+| `N` | align link group |
+| `1…9` | recall scene preset |
+| `Ctrl`+`=` `−` `0` / `Ctrl`+wheel | zoom the UI |
+
+## 🧩 How it works
 
 ```
-Железо (порт устройства)  --pw-link-->  am_cap_<id>            am_mic_<id>
-  напр. WING USB send                   (loopback capture,     (Audio/Source) <-- приложения
-                                          autoconnect=false) -->                    пишут отсюда
-                                                                       ^
-                                                              pw-record (LevelMonitor) -> RMS -> /api/levels
+Hardware port  --pw-link-->  am_cap_<id> (loopback capture, autoconnect=false)
+                                  |  (loopback)
+                                  v
+                          am_mic_<id> (Audio/Source)  <-- apps record this
+                                  ^
+                          pw-record  --> RMS --> live meters
 ```
 
-- **Канал** = один `pw-loopback`: capture-сторона `am_cap_<id>` (в неё явно линкуем
-  выбранный порт устройства), playback-сторона `am_mic_<id>` — моно `Audio/Source`.
-- **Громкость** — `Props { volume }` на ноде `am_mic` через `pw-cli set-param`;
-  итоговый volume = `gain × master × gate_envelope`, либо 0 при mute/master-mute.
-  volume > 1 усиливает (буст), лимит `GAIN_MAX`/`VOL_MAX`.
-- **Уровни** — `pw-record` на каждый микрофон, RMS в потоке; опрос `/api/levels` 80 мс.
-- **Noise gate** — на каждый гейтнутый канал отдельный `pw-record`-детектор по
-  **pre-gain** входу (чтобы гейт не мерил свой же приглушённый выход); цикл
-  `_gate_loop` (50 мс) решает open/close (порог + гистерезис + hold) и плавно ведёт
-  огибающую `gate_level` (attack/release), применяя её к громкости.
-- **Relinker** (1.5 с) — восстанавливает связь устройство→capture после
-  передёргивания USB; помечает `route_ok`.
-- **Персистентность/усыновление** — loopback'и запускаются отделёнными
-  (`start_new_session`), при остановке сервера не убиваются; при старте `restore()`
-  **усыновляет** уцелевшие ноды (тот же объект PipeWire) — приложения не теряют
-  устройство и не получают шум.
+Each channel is one `pw-loopback`; the chosen device port is explicitly linked into its
+capture side, and the playback side is a mono `Audio/Source`. Applied volume =
+`gain × master × gate_envelope` (0 if muted/soloed-out). Levels and the per-channel
+pre-gain gate detector both use `pw-record`. Nodes are started detached so they survive a
+server restart and get **adopted** on the next launch. Full notes: [`CLAUDE.md`](CLAUDE.md).
 
-### Файлы
+## 🏗️ Building the AppImage
 
-| Файл | Ответственность |
-|------|-----------------|
-| `app.py` | Flask API, `Mixer`, персист (`state.json`/`presets.json`), restore+adopt, PIN-auth, relinker, gate-loop, сигналы |
-| `pipewire.py` | PipeWire: обнаружение устройств, `Channel` (создать/усыновить/удалить/переназначить/gain/gate), граф связей, очистка |
-| `levels.py` | `LevelMonitor` (RMS метры), `ProbeMonitor` (осциллограф визарда), `GateMonitor` (pre-gain детекторы гейта) |
-| `static/` | Фронтенд: `index.html`, `style.css`, `app.js`, `test.html` |
-| `test_app.py` | Функциональные тесты (controls + gate) |
-| `run.sh`, `requirements.txt` | venv + зависимости |
-| `state.json` / `presets.json` | Сохранённое состояние / пресеты |
-| `CLAUDE.md` | Заметки по архитектуре и «граблям» |
-| `BACKLOG.md` | Идеи на потом |
+```bash
+bash packaging/build-appimage.sh        # → AudioMixer-x86_64.AppImage (~202 MB)
+```
 
----
+Bundles a portable Python + Flask/numpy/qrcode + **pywebview/Qt WebEngine** (the native
+window), trims Qt to just what's needed, and packs with `appimagetool`. The host `pw-*`
+tools are used at runtime, not bundled. Releases are built automatically by CI on every
+`vX.Y.Z` tag (see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
+Deep dive: [`packaging/NOTES.md`](packaging/NOTES.md).
 
-## API
+## ✅ Tests
 
-Все `/api/*` (кроме `/api/auth`, `/api/ping`) требуют авторизации (localhost —
-автоматически; иначе сессия по PIN).
+```bash
+.venv/bin/python test_app.py
+```
 
-| Метод | Путь | Назначение |
-|-------|------|-----------|
-| GET  | `/api/ping` | проверка авторизации |
-| GET  | `/api/netinfo` | `{pin, port, default, interfaces:[{name,ip}]}` для QR-окна |
-| GET  | `/api/qr` | `?ip=` → SVG QR-кода на `http://<ip>:<port>/?pin=<pin>` |
-| POST | `/api/auth` | `{pin}` → сессия |
-| GET  | `/api/devices` | устройства и порты |
-| POST/GET | `/api/probe`, POST `/api/probe/stop` | замер уровней устройств (осциллограф визарда) |
-| GET  | `/api/channels` | каналы + master + master_muted |
-| POST | `/api/start` | создать каналы |
-| GET  | `/api/levels` | `{levels:{mic_id: 0..1 | "no_signal" | "no_route" | "muted" | "off"}, master}` |
-| POST | `/api/volume` | `{mic_id, gain}` |
-| POST | `/api/mute` | `{mic_id, muted}` |
-| POST | `/api/gate` | `{mic_id, threshold?, attack?, hold?, release?, hyst?, apply_to?}` |
-| POST | `/api/master` | `{gain}` |
-| POST | `/api/master_mute` | `{muted}` |
-| POST | `/api/toggle` | `{mic_id, active}` |
-| POST | `/api/rename` | `{mic_id, name}` |
-| POST | `/api/reassign` | `{mic_id, new_device, new_port, …}` |
-| POST | `/api/remove` | `{mic_id}` |
-| POST | `/api/engine` | `{active}` — включить/выключить все микрофоны |
-| POST | `/api/stop` | удалить все каналы |
-| POST | `/api/shutdown` | остановить процесс сервера (микрофоны остаются) |
-| GET/POST | `/api/presets` | загрузить / сохранить пресеты (`presets.json`) |
+Functional suites against the real implementation: control endpoints actually change the
+PipeWire node volume (volume / mute / master / gate envelope / persistence / presets), and
+the noise-gate dynamics (threshold / attack / hold / release / hysteresis).
 
----
+## 📄 License
 
-## Известные нюансы
-
-- **Сигнал слишком тихий?** Источник может отдавать на ~50 dB ниже нормы — подними
-  уровень на устройстве (USB Send/трим) или фейдером с бустом (до +12 dB).
-- **В Chrome звук пропадает через ~секунду?** Это обработка голоса Chrome
-  (шумоподавление/AGC) глушит не-голосовой/системный звук. Отключай её в
-  приложении-потребителе; проверить — на `/test.html`.
-- **Не появляется USB-устройство?** Это уровень ОС: проверь `pw-dump`/`dmesg`,
-  кабель (данные, не зарядка), режим USB-Audio на устройстве.
-
-Подробности реализации — в [CLAUDE.md](CLAUDE.md). Планы — в [BACKLOG.md](BACKLOG.md).
+[GPL-3.0](LICENSE) © metallcorn
