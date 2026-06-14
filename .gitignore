@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Per-user runtime state (not source)
+state.json
+presets.json
+
+# Build artifacts (huge — never commit; GitHub rejects >100MB)
+build/
+*.AppImage
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~

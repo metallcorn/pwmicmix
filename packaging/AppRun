@@ -1,0 +1,32 @@
+#!/bin/bash
+# AudioMixer AppImage launcher.
+# Runs the bundled portable Python against the bundled app in a native window
+# (pywebview + Qt WebEngine), while deliberately using the HOST's PipeWire CLI
+# tools (pw-record / pw-cli / pw-link / pw-dump) — those must match the running
+# PipeWire daemon, so they are NOT bundled.
+
+HERE="$(dirname "$(readlink -f "$0")")"
+APPDIR="${APPDIR:-$HERE}"
+
+# Locate the embedded interpreter (e.g. opt/python3.12/bin/python3.12).
+PYBIN="$(echo "$APPDIR"/opt/python*/bin/python*.* | tr ' ' '\n' \
+         | grep -E 'python[0-9]+\.[0-9]+$' | head -1)"
+
+# Keep the host PATH so the pw-* tools are found. Do NOT export LD_LIBRARY_PATH:
+# the bundled Python resolves its libs via RPATH, and leaking the AppImage's libs
+# into spawned host binaries (pw-*) would crash them against mismatched versions.
+export PATH="$APPDIR/usr/bin:$PATH"
+
+# The AppImage is mounted read-only → persist state in a writable per-user dir.
+export AUDIOMIXER_DATA="${XDG_CONFIG_HOME:-$HOME/.config}/AudioMixer"
+# Tell the UI it's the packaged build (changes the stop/restart wording).
+export AUDIOMIXER_PACKAGED=1
+# Window icon for the native window / taskbar.
+export AUDIOMIXER_ICON="$APPDIR/AudioMixer.png"
+
+# Qt WebEngine sandbox needs either user namespaces or to be disabled; many
+# distros restrict unprivileged userns, so turn the sandbox off (we only render
+# our own localhost UI). Run under XWayland by default for broad compatibility.
+export QTWEBENGINE_DISABLE_SANDBOX=1
+
+exec "$PYBIN" "$APPDIR/opt/audiomixer/desktop.py" "$@"

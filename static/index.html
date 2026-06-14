@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0c0f">
+<title>AudioMixer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- shared gradient for device waveforms -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="waveGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#46e6c8" stop-opacity="0.5"/>
+    <stop offset="55%" stop-color="#2fb0a6" stop-opacity="0.22"/>
+    <stop offset="100%" stop-color="#1e6a8a" stop-opacity="0.02"/>
+  </linearGradient>
+</defs></svg>
+
+<div class="app">
+  <div class="topbar">
+    <div class="tb-left">
+      <span class="dot" id="dot"></span>
+      <div>
+        <div class="tb-title" id="title">AudioMixer</div>
+        <div class="tb-sub" id="subtitle">no active channels</div>
+      </div>
+    </div>
+    <div class="tb-right">
+      <button class="btn primary" id="btnAdd" onclick="openAddModal()" title="Add channel"><span class="ico">+</span><span class="lbl">Ch</span></button>
+      <button class="btn run" id="btnRun" onclick="setEngine(true)" title="Start all mics" style="display:none"><span class="ico">▶</span></button>
+      <button class="btn stop" id="btnStop" onclick="setEngine(false)" title="Stop all mics" style="display:none"><span class="ico">■</span></button>
+      <button class="btn" id="btnAlign" onclick="alignGroup()" title="Align the selected link group to the anchor"><span class="lbl">Align</span></button>
+      <button class="btn" id="btnQr" onclick="openQr()" title="Connect a phone (QR + PIN)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v7h-7" stroke-linecap="round"/></svg></button>
+      <button class="btn" id="btnHelp" onclick="toggleHelp()" title="Keyboard shortcuts">?</button>
+      <button class="btn clear" id="btnClear" onclick="askClear()" title="Remove all channels and virtual mics"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+      <button class="btn" id="btnRestart" onclick="restartServer()" title="Restart the app (mics keep running)" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg></button>
+      <button class="btn power" id="btnPower" onclick="confirmQuit()" title="Quit AudioMixer (mics keep running)"><span class="ico">⏻</span></button>
+    </div>
+  </div>
+
+  <div class="presetbar" id="presetbar"></div>
+
+  <div class="strip" id="strip"></div>
+
+  <div class="bottombar">
+    <div class="bb">PipeWire <b>active</b> · source: <b id="devlabel">—</b></div>
+    <div class="bb"><b id="chcount">0 channels</b> · <span title="Alt+1…9 select channel, Alt+0 master · ↑↓ level · ←→ switch · click the dB value to type it">⌨ Alt+1…0 · ↑↓ ←→</span> · <a href="/test.html">test mic in Chrome</a></div>
+  </div>
+</div>
+
+<!-- add / reassign modal -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h3 id="modalTitle">Add channel <button class="x" onclick="closeModal()">✕</button></h3>
+
+    <div class="step" id="step1">
+      <div class="dev-list" id="devList"></div>
+    </div>
+
+    <div class="step" id="step2">
+      <div class="port-list" id="portList"></div>
+      <div class="modal-nav">
+        <button class="btn ghost" onclick="goStep(1)">‹ Back</button>
+        <button class="btn primary" id="addConfirm" onclick="confirmAdd()"><span class="lbl">Create →</span></button>
+      </div>
+    </div>
+
+    <div class="step" id="step2r">
+      <div class="reassign-row">Reassigning <b id="reassignName">—</b></div>
+      <div class="port-list" id="reassignPortList"></div>
+      <div class="modal-nav">
+        <button class="btn ghost" onclick="goStep(1)">‹ Back</button>
+        <button class="btn primary" id="reassignConfirm" onclick="confirmReassign()"><span class="lbl">Apply →</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- login -->
+<div class="login" id="login">
+  <div class="login-card">
+    <div class="login-logo">🎚️</div>
+    <h2>AudioMixer</h2>
+    <p>Enter the PIN shown in the terminal where the server was started.</p>
+    <input class="pin-input" id="pin" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="••••">
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn primary" id="loginBtn" onclick="submitPin()" style="width:100%;justify-content:center;margin-top:6px"><span class="lbl">Connect</span></button>
+  </div>
+</div>
+
+<!-- shutdown screen -->
+<div class="downscreen" id="downscreen">
+  <div class="ds-card">
+    <div class="ds-ico">⏻</div>
+    <h2>Server stopped</h2>
+    <p>The control UI is down, but your microphones keep running — apps won't drop.<br><span id="dsNote">Run <code>./run.sh</code> to control them again. To remove mics, use ⏹ Stop first.</span></p>
+  </div>
+</div>
+
+<!-- keyboard shortcuts help -->
+<div class="modal-bg" id="help">
+  <div class="modal">
+    <h3>Keyboard shortcuts <button class="x" onclick="toggleHelp()">✕</button></h3>
+    <div class="keys">
+      <div><kbd>Alt</kbd>+<kbd>1…9</kbd><span>select channel</span></div>
+      <div><kbd>Alt</kbd>+<kbd>0</kbd><span>select master</span></div>
+      <div><kbd>←</kbd> <kbd>→</kbd><span>switch channel</span></div>
+      <div><kbd>↑</kbd> <kbd>↓</kbd><span>volume (Shift = big step)</span></div>
+      <div><kbd>[</kbd> <kbd>]</kbd><span>noise-gate threshold (selected)</span></div>
+      <div><kbd>M</kbd><span>mute selected</span></div>
+      <div><kbd>Alt</kbd>+<kbd>M</kbd><span>mute the link group</span></div>
+      <div><kbd>S</kbd><span>solo selected (clears mute)</span></div>
+      <div><kbd>Alt</kbd>+<kbd>S</kbd><span>solo the link group</span></div>
+      <div><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd><span>master mute (all)</span></div>
+      <div><kbd>L</kbd><span>link / unlink selected</span></div>
+      <div><kbd>Alt</kbd>+<kbd>L</kbd><span>unlink all</span></div>
+      <div><kbd>N</kbd><span>align link group to anchor</span></div>
+      <div><kbd>1</kbd>…<kbd>9</kbd><span>recall preset / scene</span></div>
+      <div><kbd>Ctrl</kbd>+<kbd>=</kbd> <kbd>−</kbd> <kbd>0</kbd><span>zoom UI in / out / reset (or Ctrl+wheel)</span></div>
+      <div><span class="kw">wheel</span><span>over a fader — quick volume</span></div>
+      <div><span class="kw">click</span><span>the dB value — type it</span></div>
+      <div><span class="kw">drag</span><span>the ▸ on a meter or the NG knob — gate</span></div>
+      <div><span class="kw">🔒</span><span>link faders to move together · <b>Align</b> levels them</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- clear confirmation -->
+<div class="modal-bg" id="clearModal">
+  <div class="modal">
+    <h3>Remove everything? <button class="x" onclick="closeClear()">✕</button></h3>
+    <p class="warn-text">This deletes <b>all channels</b> and their virtual microphones. Apps currently using them will lose the input. This can't be undone.</p>
+    <div class="modal-nav">
+      <button class="btn ghost" onclick="closeClear()">Cancel</button>
+      <button class="btn stop" id="clearConfirm" onclick="doClear()"><span class="lbl">Remove all</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- quit confirmation -->
+<div class="modal-bg" id="quitModal">
+  <div class="modal">
+    <h3>Quit AudioMixer? <button class="x" onclick="closeQuitModal()">✕</button></h3>
+    <p class="warn-text">The app will close. Your virtual microphones <b>keep running</b>, so apps using them won't lose their input — relaunch AudioMixer to control them again. To remove the mics entirely, use ⏹ Stop or 🗑 Clear first.</p>
+    <div class="modal-nav">
+      <button class="btn ghost" onclick="closeQuitModal()">Cancel</button>
+      <button class="btn power" id="quitConfirm" onclick="doQuit()"><span class="lbl">Quit</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- restart confirmation -->
+<div class="modal-bg" id="restartModal">
+  <div class="modal">
+    <h3>Restart AudioMixer? <button class="x" onclick="closeRestartModal()">✕</button></h3>
+    <p class="warn-text">The server restarts in place. Your virtual microphones keep running and the window reconnects in a moment.</p>
+    <div class="modal-nav">
+      <button class="btn ghost" onclick="closeRestartModal()">Cancel</button>
+      <button class="btn primary" id="restartConfirm" onclick="doRestart()"><span class="lbl">Restart</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- connect-a-phone QR -->
+<div class="modal-bg" id="qrmodal">
+  <div class="modal">
+    <h3>Connect a phone <button class="x" onclick="closeQr()">✕</button></h3>
+    <div class="qr-ifaces" id="qrIfaces"></div>
+    <div class="qr-box"><img id="qrImg" alt="QR code" width="220" height="220"></div>
+    <div class="qr-info" id="qrInfo"></div>
+    <p class="hint-row">Scan with a phone on the same network — it opens the mixer and signs in with the PIN automatically. Pick the right network if you have several (hotspot / Wi-Fi / cable).</p>
+  </div>
+</div>
+
+<!-- per-channel noise-gate settings popup -->
+<div class="ngcfg" id="ngcfg"></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

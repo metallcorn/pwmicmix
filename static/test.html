@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AudioMixer · mic test</title>
+<style>
+:root{--font-sans:'Inter',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:radial-gradient(900px 500px at 50% -10%,#16202a,transparent 60%),#0a0c0f;color:#e8ebef;font-family:var(--font-sans);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:linear-gradient(180deg,#1b1f25,#14171c);border:0.5px solid rgba(255,255,255,.12);border-radius:16px;padding:24px;width:100%;max-width:470px;box-shadow:0 30px 70px -20px rgba(0,0,0,.8)}
+h1{font-size:16px;font-weight:600;margin-bottom:5px}
+.hint{font-size:12.5px;color:#9aa3ad;margin-bottom:18px;line-height:1.55}
+label.fld{display:block;font-size:11px;color:#8a929c;margin:14px 0 6px}
+select{width:100%;background:rgba(0,0,0,.35);border:0.5px solid rgba(255,255,255,.12);border-radius:9px;color:#e8ebef;padding:9px 11px;font-size:13px;outline:none}
+select:focus{border-color:#2fe0a6}
+.toggles{display:flex;flex-direction:column;gap:10px;margin:16px 0;padding:14px;background:rgba(0,0,0,.2);border:0.5px solid rgba(255,255,255,.07);border-radius:11px}
+.row{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:#cfd6dd}
+.row input{accent-color:#2fe0a6;width:17px;height:17px}
+.meter{height:24px;background:#070809;border:0.5px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;position:relative;margin:18px 0 6px}
+.bar{height:100%;width:0%;background:linear-gradient(to right,#159e57,#2ee08a 55%,#f5b14c 80%,#ff5a5a);transition:width .05s linear}
+.peak{position:absolute;top:0;height:100%;width:2px;background:#fff;opacity:.7;left:0;transition:left .1s}
+.stats{display:flex;justify-content:space-between;font-size:10px;color:#5b636d;font-family:var(--font-mono);margin-top:6px}
+.btns{display:flex;gap:8px;margin-top:18px}
+button{flex:1;font-size:13px;font-weight:500;padding:10px;border-radius:9px;border:0.5px solid rgba(47,224,166,.4);color:#2fe0a6;background:rgba(47,224,166,.08);cursor:pointer;transition:all .16s}
+button:hover{background:rgba(47,224,166,.16)}
+button.stop{border-color:rgba(255,90,90,.35);color:#ff5a5a;background:rgba(255,90,90,.08)}
+button.stop:hover{background:rgba(255,90,90,.16)}
+.status{font-size:11.5px;color:#8a929c;margin-top:14px;min-height:16px}
+.status.live{color:#2ee08a}.status.err{color:#ff5a5a}
+.applied{font-size:10px;color:#5b636d;font-family:var(--font-mono);margin-top:8px;white-space:pre-wrap}
+a{color:#3aa0ff;font-size:11.5px;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Test microphone in Chrome</h1>
+  <div class="hint">This page captures the selected microphone right in the browser and shows a live level. Compare the level with voice processing on vs off — if it's steady with processing off but dies with it on, the audio is being gated by the app's processing, not by the virtual microphone.</div>
+
+  <label class="fld">Microphone</label>
+  <select id="dev"></select>
+
+  <div class="toggles">
+    <div class="row"><span>Noise suppression</span><input type="checkbox" id="ns"></div>
+    <div class="row"><span>Echo cancellation</span><input type="checkbox" id="ec"></div>
+    <div class="row"><span>Auto gain control</span><input type="checkbox" id="agc"></div>
+    <div class="row"><span>🔊 Monitor to speakers</span><input type="checkbox" id="mon"></div>
+  </div>
+
+  <div class="meter"><div class="bar" id="bar"></div><div class="peak" id="peak"></div></div>
+  <div class="stats"><span id="rms">rms —</span><span id="pk">peak —</span></div>
+
+  <div class="btns">
+    <button id="start" onclick="start()">▶ Start capture</button>
+    <button id="stopBtn" class="stop" onclick="stop()" style="display:none">■ Stop</button>
+  </div>
+  <div class="status" id="status">pick a device and press “Start”</div>
+  <div class="applied" id="applied"></div>
+  <div style="margin-top:14px"><a href="/">← back to mixer</a></div>
+</div>
+
+<script>
+let stream=null, ctx=null, raf=null;
+const $=(id)=>document.getElementById(id);
+async function listDevices(sel){
+  try{
+    const devs=await navigator.mediaDevices.enumerateDevices();
+    $('dev').innerHTML=devs.filter(d=>d.kind==='audioinput').map(d=>`<option value="${d.deviceId}">${d.label||('microphone '+d.deviceId.slice(0,6))}</option>`).join('');
+    if(sel) $('dev').value=sel;
+  }catch(e){ setStatus('could not list devices: '+e.message,'err'); }
+}
+function setStatus(t,cls){ const s=$('status'); s.textContent=t; s.className='status'+(cls?' '+cls:''); }
+async function start(){
+  await stop();
+  const constraints={audio:{deviceId:$('dev').value?{exact:$('dev').value}:undefined,
+    noiseSuppression:$('ns').checked, echoCancellation:$('ec').checked, autoGainControl:$('agc').checked}};
+  try{ stream=await navigator.mediaDevices.getUserMedia(constraints); }
+  catch(e){ setStatus('getUserMedia: '+e.message,'err'); return; }
+  await listDevices($('dev').value);
+  const track=stream.getAudioTracks()[0];
+  $('applied').textContent='applied: '+JSON.stringify(track.getSettings());
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const src=ctx.createMediaStreamSource(stream);
+  const an=ctx.createAnalyser(); an.fftSize=1024; src.connect(an);
+  if($('mon').checked) src.connect(ctx.destination);
+  const buf=new Float32Array(an.fftSize); let peak=0;
+  const tick=()=>{
+    an.getFloatTimeDomainData(buf);
+    let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*buf[i];
+    const rms=Math.sqrt(sum/buf.length), pct=Math.min(100,rms*140);
+    $('bar').style.width=pct+'%'; peak=Math.max(peak*0.96,pct); $('peak').style.left=peak+'%';
+    $('rms').textContent='rms '+rms.toFixed(4); $('pk').textContent='peak '+(peak/100).toFixed(3);
+    raf=requestAnimationFrame(tick);
+  };
+  tick();
+  $('start').style.display='none'; $('stopBtn').style.display=''; setStatus('capturing — watch the level','live');
+}
+async function stop(){
+  if(raf) cancelAnimationFrame(raf), raf=null;
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  if(ctx){ await ctx.close().catch(()=>{}); ctx=null; }
+  $('bar').style.width='0%'; $('peak').style.left='0%';
+  $('start').style.display=''; $('stopBtn').style.display='none';
+  if($('status').className.indexOf('err')<0) setStatus('stopped');
+}
+['dev','ns','ec','agc','mon'].forEach(id=>$(id).addEventListener('change',()=>{ if(stream) start(); }));
+listDevices();
+</script>
+</body>
+</html>

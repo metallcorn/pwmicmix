@@ -1,0 +1,488 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.app{background:#111;border-radius:10px;overflow:hidden;border:0.5px solid #333;font-family:var(--font-sans)}
+.topbar{background:#1a1a1a;padding:9px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #2a2a2a}
+.topbar-left{display:flex;align-items:center;gap:8px}
+.pulse{width:7px;height:7px;border-radius:50%;background:#2ecc71;animation:pulse 2s infinite}
+.pulse.off{background:#444;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.title{color:#ddd;font-size:13px;font-weight:500}
+.topbar-right{display:flex;gap:6px;align-items:center}
+.tbtn{font-size:11px;padding:4px 10px;border-radius:5px;border:0.5px solid #444;color:#aaa;background:transparent;cursor:pointer;white-space:nowrap}
+.tbtn:hover{background:#222}
+.tbtn.stop{border-color:#c0392b;color:#e74c3c}
+.tbtn.stop:hover{background:#1a0808}
+.tbtn.add{border-color:#2980b9;color:#3498db}
+.tbtn.add:hover{background:#0a1520}
+
+.strip-wrap{display:flex;overflow-x:auto;min-height:290px}
+.strip-wrap::-webkit-scrollbar{height:4px}
+.strip-wrap::-webkit-scrollbar-track{background:#0a0a0a}
+.strip-wrap::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+
+.ch{min-width:88px;max-width:88px;background:#141414;border-right:0.5px solid #1e1e1e;padding:8px 6px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;transition:background .2s}
+.ch.active{background:#0e1a14}
+.ch.clipping{background:#1a0e0e}
+.ch.muted{background:#111;opacity:.6}
+.ch.master{background:#0e0e1a;min-width:76px;max-width:76px}
+.ch.adding{min-width:60px;max-width:60px;background:#0a0e14;justify-content:center;cursor:pointer;border-right:0.5px solid #1e1e1e}
+.ch.adding:hover{background:#0e1520}
+
+.ch-header{width:100%;display:flex;align-items:center;justify-content:space-between;gap:2px}
+.ch-num{font-size:9px;color:#444;font-weight:500}
+.ch-actions{display:flex;gap:2px}
+.icon-btn{width:16px;height:16px;border-radius:3px;border:none;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:#555;line-height:1}
+.icon-btn:hover{background:#222;color:#aaa}
+.icon-btn.del:hover{background:#2a0808;color:#e74c3c}
+
+.ch-name{width:76px;text-align:center;cursor:pointer}
+.ch-name strong{display:block;font-size:11px;color:#ddd;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-name small{font-size:9px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.name-edit{width:76px;font-size:11px;background:#1a1a1a;border:0.5px solid #3498db;border-radius:3px;color:#ddd;padding:2px 4px;text-align:center;outline:none}
+
+.badge{font-size:8px;padding:1px 5px;border-radius:2px;font-weight:500}
+.badge.ok{background:#0a1f0a;color:#4caf50;border:0.5px solid #1a4a1a}
+.badge.warn{background:#1f130a;color:#f0a030;border:0.5px solid #4a2a0a}
+.badge.err{background:#1f0808;color:#e05050;border:0.5px solid #4a1010}
+.badge.test{background:#0a1220;color:#4090d0;border:0.5px solid #1a3a5a}
+.badge.off{background:#1a1a1a;color:#555;border:0.5px solid #2a2a2a}
+
+.vu-row{display:flex;gap:3px}
+.vu{width:10px;height:80px;background:#0a0a0a;border-radius:2px;overflow:hidden;position:relative;border:0.5px solid #222}
+.vu-bar{position:absolute;bottom:0;width:100%;transition:height .07s ease}
+.vu-bar.g{background:#1e8a1e}
+.vu-bar.y{background:#c0880a}
+.vu-bar.r{background:#c02020}
+.vu-peak{position:absolute;width:100%;height:2px;background:#ff4444;transition:top .07s ease}
+.clip-led{width:8px;height:8px;border-radius:50%;background:#333;border:0.5px solid #444;transition:background .1s}
+.clip-led.on{background:#e74c3c;box-shadow:0 0 4px #e74c3c}
+
+.fader-col{display:flex;flex-direction:column;align-items:center;gap:3px}
+.fader-col label{font-size:9px;color:#555}
+input[type=range].vfader{-webkit-appearance:slider-vertical;writing-mode:vertical-lr;direction:rtl;width:18px;height:72px;cursor:pointer;accent-color:#3a7a5a}
+.db{font-size:9px;color:#666;font-family:var(--font-mono)}
+
+.route{font-size:8px;color:#2a5a3a;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:76px}
+.route.active-r{color:#2ecc71}
+.route.err-r{color:#c03030}
+
+.toggle{width:28px;height:14px;border-radius:7px;background:#222;border:0.5px solid #333;cursor:pointer;position:relative;flex-shrink:0}
+.toggle.on{background:#0f3a1f;border-color:#1e5a2e}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#444;transition:all .15s}
+.toggle.on::after{background:#2ecc71;left:16px}
+
+.st{font-size:8px;padding:1px 4px;border-radius:2px;font-weight:500}
+.st.ok{color:#2ecc71;background:#061406}
+.st.warn{color:#f0a030;background:#160c00;animation:blink .8s step-end infinite}
+.st.err{color:#e05050;background:#160404}
+.st.off{color:#444;background:#111}
+@keyframes blink{50%{opacity:.3}}
+
+.add-icon{font-size:22px;color:#2a4a6a;line-height:1}
+.add-label{font-size:9px;color:#2a5a8a;text-align:center}
+
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#1a1a1a;border:0.5px solid #333;border-radius:10px;padding:16px;min-width:280px;max-width:340px;width:100%}
+.modal h3{color:#ddd;font-size:13px;font-weight:500;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.modal-close{background:none;border:none;color:#555;cursor:pointer;font-size:16px;line-height:1}
+.modal-close:hover{color:#aaa}
+.step{display:none}
+.step.active{display:block}
+.dev-list{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.dev-item{padding:8px 10px;border-radius:6px;border:0.5px solid #2a2a2a;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+.dev-item:hover{border-color:#3498db;background:#0a1520}
+.dev-item-name{font-size:12px;color:#ccc}
+.dev-item-sub{font-size:10px;color:#555}
+.dev-item-arrow{color:#3498db;font-size:14px}
+.port-list{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.port-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:5px;border:0.5px solid #222;background:#111}
+.port-row input[type=checkbox]{accent-color:#3498db}
+.port-row-info{flex:1;font-size:11px;color:#bbb}
+.port-row-info small{font-size:9px;color:#555;display:block}
+.port-row input[type=text]{width:80px;font-size:10px;background:#1e1e1e;border:0.5px solid #333;border-radius:3px;color:#ccc;padding:2px 5px}
+.modal-nav{display:flex;gap:6px;justify-content:space-between;margin-top:4px}
+.mbtn{font-size:11px;padding:5px 12px;border-radius:5px;border:0.5px solid #333;color:#aaa;background:transparent;cursor:pointer}
+.mbtn:hover{background:#222}
+.mbtn.primary{border-color:#2980b9;color:#3498db}
+.mbtn.primary:hover{background:#0a1520}
+.reassign-row{padding:6px 8px;border-radius:5px;border:0.5px solid #2a3a2a;background:#0a120a;margin-bottom:8px;font-size:11px;color:#8a8}
+.reassign-row strong{color:#aaa}
+select.port-sel{background:#1e1e1e;border:0.5px solid #333;border-radius:3px;color:#ccc;font-size:10px;padding:2px 4px;cursor:pointer}
+
+.toast-area{position:fixed;bottom:12px;right:12px;display:flex;flex-direction:column;gap:4px;z-index:200}
+.toast{font-size:11px;padding:6px 12px;border-radius:6px;background:#1e2a1e;border:0.5px solid #2a4a2a;color:#aaa;animation:toastIn .2s ease}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+.bottombar{background:#161616;border-top:0.5px solid #222;padding:6px 14px;display:flex;align-items:center;justify-content:space-between}
+.bb{font-size:10px;color:#444}
+.bb span{color:#666}
+</style>
+
+<div class="app">
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="pulse" id="mainpulse"></div>
+    <span class="title" id="maintitle">4 канала активны</span>
+  </div>
+  <div class="topbar-right">
+    <button class="tbtn add" onclick="openAddModal(null)">+ канал</button>
+    <button class="tbtn stop" onclick="stopAll()">⏹ стоп</button>
+  </div>
+</div>
+
+<div class="strip-wrap" id="strip">
+
+<div class="ch master" id="chMaster">
+  <div class="ch-header">
+    <span class="ch-num">MST</span>
+  </div>
+  <div class="ch-name"><strong>мастер</strong><small>&nbsp;</small></div>
+  <div style="display:flex;gap:2px;align-items:flex-end">
+    <div class="vu"><div class="vu-bar g" id="vuML" style="height:60%"></div><div class="vu-peak" id="pkML" style="top:38%"></div></div>
+    <div class="vu"><div class="vu-bar g" id="vuMR" style="height:55%"></div><div class="vu-peak" id="pkMR" style="top:43%"></div></div>
+  </div>
+  <div class="fader-col">
+    <label>vol</label>
+    <input type="range" class="vfader" min="0" max="100" value="80" oninput="setDb(this,'dbM')">
+    <span class="db" id="dbM">−4dB</span>
+  </div>
+</div>
+
+</div>
+
+<div class="bottombar">
+  <div class="bb">pipewire <span>активен</span> · устройство: <span id="devlabel">Behringer WING</span></div>
+  <div class="bb"><span id="chcount">4 канала</span> · нажми на имя — переименовать · ⚙ — переназначить</div>
+</div>
+</div>
+
+<div class="modal-bg" id="modal">
+<div class="modal">
+  <h3 id="modalTitle">Добавить канал <button class="modal-close" onclick="closeModal()">✕</button></h3>
+
+  <div class="step active" id="step1">
+    <div class="dev-list">
+      <div class="dev-item" onclick="selectDev('WING','Behringer WING','WING ch')">
+        <div><div class="dev-item-name">Behringer WING</div><div class="dev-item-sub">USB · 48 каналов</div></div>
+        <span class="dev-item-arrow">›</span>
+      </div>
+      <div class="dev-item" onclick="selectDev('Logitech','Logitech StreamCam','StreamCam')">
+        <div><div class="dev-item-name">Logitech StreamCam</div><div class="dev-item-sub">USB · 2 канала (L/R)</div></div>
+        <span class="dev-item-arrow">›</span>
+      </div>
+      <div class="dev-item" onclick="selectDev('Mic1','Встроенный микрофон','Mic')">
+        <div><div class="dev-item-name">Встроенный микрофон</div><div class="dev-item-sub">PCH · 1 канал</div></div>
+        <span class="dev-item-arrow">›</span>
+      </div>
+      <div class="dev-item" onclick="selectDev('Monitor','Мониторинг колонок','Monitor')">
+        <div><div class="dev-item-name">Мониторинг колонок</div><div class="dev-item-sub">Speaker sink monitor</div></div>
+        <span class="dev-item-arrow">›</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="step" id="step2">
+    <div class="port-list" id="portList"></div>
+    <div class="modal-nav">
+      <button class="mbtn" onclick="goStep(1)">‹ назад</button>
+      <button class="mbtn primary" onclick="confirmAdd()">создать →</button>
+    </div>
+  </div>
+
+  <div class="step" id="step3r">
+    <div class="reassign-row">Переназначаем: <strong id="reassignName">—</strong></div>
+    <div style="margin-bottom:8px;font-size:11px;color:#777">Новый источник:</div>
+    <div class="dev-list" id="reassignDevList"></div>
+    <div class="step" id="step3r2" style="margin-top:8px">
+      <div class="port-list" id="reassignPortList"></div>
+      <div class="modal-nav">
+        <button class="mbtn" onclick="goReassignBack()">‹ назад</button>
+        <button class="mbtn primary" onclick="confirmReassign()">применить →</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="toast-area" id="toasts"></div>
+
+<script>
+let channels=[];
+let nextId=1;
+let reassignTarget=null;
+let curDev=null;
+let curPorts=[];
+
+const devPorts={
+  WING:Array.from({length:12},((_,i)=>({id:'ch'+(i+1),label:'канал '+(i+1)}))),
+  Logitech:[{id:'FL',label:'левый (FL)'},{id:'FR',label:'правый (FR)'}],
+  Mic1:[{id:'mono',label:'моно'}],
+  Monitor:[{id:'FL',label:'лево (FL)'},{id:'FR',label:'право (FR)'}]
+};
+
+const vuState={};
+
+function initChannels(){
+  const init=[
+    {id:nextId++,name:'Ведущий',src:'WING',port:'ch3',portLabel:'WING ch3',active:true,gain:75,status:'ok'},
+    {id:nextId++,name:'Гость 1',src:'WING',port:'ch7',portLabel:'WING ch7',active:true,gain:90,status:'clip'},
+    {id:nextId++,name:'Петличка',src:'WING',port:'ch12',portLabel:'WING ch12',active:true,gain:60,status:'ok'},
+    {id:nextId++,name:'Запасной',src:'WING',port:'ch15',portLabel:'WING ch15',active:true,gain:70,status:'nosig'},
+  ];
+  channels=init;
+  renderAll();
+}
+
+function renderAll(){
+  const strip=document.getElementById('strip');
+  const master=document.getElementById('chMaster');
+  strip.innerHTML='';
+  strip.appendChild(master);
+  channels.forEach(ch=>strip.appendChild(makeChannel(ch)));
+  const addBtn=document.createElement('div');
+  addBtn.className='ch adding';
+  addBtn.onclick=()=>openAddModal(null);
+  addBtn.innerHTML='<div class="add-icon">+</div><div class="add-label">канал</div>';
+  strip.appendChild(addBtn);
+  document.getElementById('chcount').textContent=channels.length+' канала';
+  document.getElementById('maintitle').textContent=channels.filter(c=>c.active).length+' каналов активны';
+  channels.forEach(ch=>{
+    if(!vuState[ch.id]) vuState[ch.id]={lvl:ch.status==='nosig'?0:ch.status==='clip'?88:Math.random()*50+20,peak:0};
+  });
+}
+
+function makeChannel(ch){
+  const d=document.createElement('div');
+  d.className='ch'+(ch.active?' active':'')+(ch.status==='clip'?' clipping':'')+(ch.status==='nosig'||!ch.active?' muted':'');
+  d.id='ch'+ch.id;
+  const statusText={ok:'сигнал',clip:'клиппинг!',nosig:'нет сигн.',off:'выкл.'};
+  const statusCls={ok:'ok',clip:'warn',nosig:'err',off:'off'};
+  const badgeText={ok:'активен',clip:'клиппинг',nosig:'нет входа',off:'выкл.'};
+  const badgeCls={ok:'ok',clip:'warn',nosig:'err',off:'off'};
+  const s=ch.active?ch.status:'off';
+  d.innerHTML=`
+  <div class="ch-header">
+    <span class="ch-num">#${ch.id}</span>
+    <div class="ch-actions">
+      <button class="icon-btn" title="переназначить" onclick="openReassign(${ch.id})">⚙</button>
+      <button class="icon-btn del" title="удалить канал" onclick="removeChannel(${ch.id})">✕</button>
+    </div>
+  </div>
+  <div class="ch-name" id="name${ch.id}" ondblclick="startRename(${ch.id})">
+    <strong id="nametext${ch.id}">${ch.name}</strong>
+    <small>${ch.portLabel}</small>
+  </div>
+  <span class="badge ${badgeCls[s]}">${badgeText[s]}</span>
+  <div class="vu-row">
+    <div class="vu"><div class="vu-bar g" id="vu${ch.id}" style="height:${ch.active&&s!=='off'?40:0}%"></div><div class="vu-peak" id="pk${ch.id}" style="top:58%"></div></div>
+  </div>
+  <div class="clip-led ${s==='clip'?'on':''}" id="led${ch.id}"></div>
+  <div class="fader-col">
+    <label>vol</label>
+    <input type="range" class="vfader" min="0" max="100" value="${ch.gain}" oninput="setDb(this,'db${ch.id}');channels.find(c=>c.id===${ch.id}).gain=parseInt(this.value)">
+    <span class="db" id="db${ch.id}">${gainToDb(ch.gain)}</span>
+  </div>
+  <div class="route ${ch.active?'active-r':''}">→ Mic ${ch.id}</div>
+  <div class="toggle ${ch.active?'on':''}" id="tog${ch.id}" onclick="toggleChannel(${ch.id})"></div>
+  <div class="st ${statusCls[s]}" id="st${ch.id}">${statusText[s]}</div>`;
+  return d;
+}
+
+function gainToDb(v){
+  if(v===0) return '−∞';
+  if(v>=99) return '0dB';
+  return '−'+Math.round((100-v)*0.3)+'dB';
+}
+
+function setDb(el,outId){
+  document.getElementById(outId).textContent=gainToDb(parseInt(el.value));
+}
+
+function toggleChannel(id){
+  const ch=channels.find(c=>c.id===id);
+  if(!ch) return;
+  ch.active=!ch.active;
+  if(!ch.active) ch.status='off';
+  else ch.status=ch.id===4?'nosig':'ok';
+  renderAll();
+  toast(ch.active?`Канал "${ch.name}" включён`:`Канал "${ch.name}" выключен`);
+}
+
+function removeChannel(id){
+  const ch=channels.find(c=>c.id===id);
+  channels=channels.filter(c=>c.id!==id);
+  delete vuState[id];
+  renderAll();
+  toast(`Канал "${ch?.name||id}" удалён`);
+}
+
+function startRename(id){
+  const nameDiv=document.getElementById('name'+id);
+  const ch=channels.find(c=>c.id===id);
+  if(!ch||nameDiv.querySelector('input')) return;
+  const inp=document.createElement('input');
+  inp.type='text';inp.className='name-edit';inp.value=ch.name;
+  nameDiv.innerHTML='';nameDiv.appendChild(inp);
+  inp.focus();inp.select();
+  const done=()=>{
+    const v=inp.value.trim()||ch.name;
+    ch.name=v;
+    nameDiv.innerHTML=`<strong id="nametext${id}">${v}</strong><small>${ch.portLabel}</small>`;
+    nameDiv.ondblclick=()=>startRename(id);
+  };
+  inp.onblur=done;
+  inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();done();}if(e.key==='Escape'){ch.name=ch.name;done();}};
+}
+
+function openAddModal(preselDev){
+  reassignTarget=null;
+  document.getElementById('modalTitle').innerHTML='Добавить канал <button class="modal-close" onclick="closeModal()">✕</button>';
+  goStep(1);
+  document.getElementById('step3r').style.display='none';
+  document.getElementById('step3r2').style.display='none';
+  document.getElementById('step1').style.display='block';
+  document.getElementById('modal').classList.add('open');
+}
+
+function openReassign(id){
+  reassignTarget=id;
+  const ch=channels.find(c=>c.id===id);
+  document.getElementById('modalTitle').innerHTML=`Переназначить "${ch?.name}" <button class="modal-close" onclick="closeModal()">✕</button>`;
+  document.getElementById('reassignName').textContent=ch?.name||'—';
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2').style.display='none';
+  document.getElementById('step3r').style.display='block';
+  document.getElementById('step3r2').style.display='none';
+  const dl=document.getElementById('reassignDevList');
+  dl.innerHTML=[
+    {k:'WING',n:'Behringer WING',s:'USB · 48 каналов'},
+    {k:'Logitech',n:'Logitech StreamCam',s:'USB · 2 канала'},
+    {k:'Mic1',n:'Встроенный микрофон',s:'PCH · 1 канал'},
+    {k:'Monitor',n:'Мониторинг колонок',s:'Speaker sink monitor'}
+  ].map(d=>`<div class="dev-item" onclick="selectReassignDev('${d.k}','${d.n}')"><div><div class="dev-item-name">${d.n}</div><div class="dev-item-sub">${d.s}</div></div><span class="dev-item-arrow">›</span></div>`).join('');
+  document.getElementById('modal').classList.add('open');
+}
+
+function selectReassignDev(key,name){
+  curDev={key,name};
+  const ports=devPorts[key]||[];
+  const pl=document.getElementById('reassignPortList');
+  pl.innerHTML=ports.map(p=>`
+    <div class="port-row">
+      <input type="radio" name="rport" value="${p.id}" id="rp_${p.id}">
+      <label class="port-row-info" for="rp_${p.id}">${p.label}<small>${name} · ${p.id}</small></label>
+    </div>`).join('');
+  if(ports[0]) pl.querySelector('input[type=radio]').checked=true;
+  document.getElementById('step3r2').style.display='block';
+}
+
+function goReassignBack(){document.getElementById('step3r2').style.display='none';}
+
+function confirmReassign(){
+  if(!reassignTarget||!curDev) return;
+  const sel=document.querySelector('input[name=rport]:checked');
+  if(!sel) return;
+  const ch=channels.find(c=>c.id===reassignTarget);
+  if(!ch) return;
+  const portLabel=curDev.name+' · '+sel.value;
+  ch.src=curDev.key;ch.port=sel.value;ch.portLabel=portLabel;
+  ch.status='ok';ch.active=true;
+  renderAll();
+  closeModal();
+  toast(`"${ch.name}" → ${portLabel}`);
+}
+
+function selectDev(key,name,prefix){
+  curDev={key,name,prefix};
+  curPorts=devPorts[key]||[];
+  const pl=document.getElementById('portList');
+  pl.innerHTML=curPorts.map((p,i)=>`
+    <div class="port-row">
+      <input type="checkbox" value="${p.id}" id="p_${p.id}" ${i<2?'checked':''}>
+      <label class="port-row-info" for="p_${p.id}">${p.label}<small>${name} · ${p.id}</small></label>
+      <input type="text" placeholder="имя" value="${i===0?'Ведущий':i===1?'Гость '+i:''}">
+    </div>`).join('');
+  goStep(2);
+}
+
+function goStep(n){
+  [1,2].forEach(i=>document.getElementById('step'+i).style.display=i===n?'block':'none');
+}
+
+function confirmAdd(){
+  const rows=document.querySelectorAll('#portList .port-row');
+  let added=0;
+  rows.forEach(row=>{
+    const cb=row.querySelector('input[type=checkbox]');
+    if(!cb||!cb.checked) return;
+    const nameInp=row.querySelector('input[type=text]');
+    const nm=nameInp?.value.trim()||'Mic '+nextId;
+    const portLabel=(curDev?.name||'')+' · '+cb.value;
+    channels.push({id:nextId++,name:nm,src:curDev?.key,port:cb.value,portLabel,active:true,gain:70,status:'ok'});
+    added++;
+  });
+  renderAll();
+  closeModal();
+  if(added) toast(`Добавлено каналов: ${added}`);
+}
+
+function closeModal(){document.getElementById('modal').classList.remove('open');curDev=null;}
+
+function stopAll(){
+  channels.forEach(ch=>{ch.active=false;ch.status='off';});
+  document.getElementById('mainpulse').className='pulse off';
+  document.getElementById('maintitle').textContent='остановлено';
+  renderAll();
+  toast('Все виртуальные микрофоны удалены');
+}
+
+function toast(msg){
+  const t=document.createElement('div');
+  t.className='toast';t.textContent=msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(()=>t.remove(),2500);
+}
+
+function animVu(){
+  channels.forEach(ch=>{
+    const el=document.getElementById('vu'+ch.id);
+    const pk=document.getElementById('pk'+ch.id);
+    const led=document.getElementById('led'+ch.id);
+    if(!el) return;
+    const vs=vuState[ch.id];
+    if(!vs) return;
+    if(!ch.active||ch.status==='off'){el.style.height='0%';return;}
+    if(ch.status==='nosig'){el.style.height='0%';return;}
+    const base=ch.status==='clip'?80:35;
+    const jit=ch.status==='clip'?18:25;
+    const g=ch.gain/100;
+    let v=Math.max(0,Math.min(100,(base+Math.random()*jit-jit/2)*g));
+    vs.lvl=vs.lvl*0.7+v*0.3;
+    if(vs.lvl>vs.peak) vs.peak=vs.lvl; else vs.peak=vs.peak*0.98;
+    el.style.height=vs.lvl+'%';
+    el.className='vu-bar '+(vs.lvl>85?'r':vs.lvl>65?'y':'g');
+    if(pk){pk.style.top=Math.max(0,100-vs.peak)+'%';}
+    if(led) led.className='clip-led'+(vs.lvl>90?' on':'');
+    const st=document.getElementById('st'+ch.id);
+    if(st&&ch.active){
+      if(vs.lvl>90){st.className='st warn';st.textContent='клиппинг!';}
+      else if(vs.lvl<2){st.className='st err';st.textContent='нет сигн.';}
+      else{st.className='st ok';st.textContent='сигнал';}
+    }
+    const chEl=document.getElementById('ch'+ch.id);
+    if(chEl){
+      chEl.className='ch active'+(vs.lvl>90?' clipping':'');
+    }
+  });
+  const ml=document.getElementById('vuML'),mr=document.getElementById('vuMR');
+  if(ml){const v=Math.random()*25+45;ml.style.height=v+'%';ml.className='vu-bar '+(v>85?'r':v>65?'y':'g');}
+  if(mr){const v=Math.random()*20+40;mr.style.height=v+'%';mr.className='vu-bar '+(v>85?'r':v>65?'y':'g');}
+  requestAnimationFrame(animVu);
+}
+
+initChannels();
+animVu();
+</script>

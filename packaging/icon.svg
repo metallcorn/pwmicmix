@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1f25"/>
+      <stop offset="1" stop-color="#0a0c0f"/>
+    </linearGradient>
+    <linearGradient id="knob" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5ff0d6"/>
+      <stop offset="1" stop-color="#2bb0a0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)" stroke="#2a2f37" stroke-width="2"/>
+  <!-- fader tracks -->
+  <g stroke="#3a4048" stroke-width="6" stroke-linecap="round">
+    <line x1="78" y1="54" x2="78" y2="202"/>
+    <line x1="128" y1="54" x2="128" y2="202"/>
+    <line x1="178" y1="54" x2="178" y2="202"/>
+  </g>
+  <!-- active (teal) portion below each knob -->
+  <g stroke="#2fb0a6" stroke-width="6" stroke-linecap="round" opacity=".55">
+    <line x1="78" y1="120" x2="78" y2="202"/>
+    <line x1="128" y1="90" x2="128" y2="202"/>
+    <line x1="178" y1="150" x2="178" y2="202"/>
+  </g>
+  <!-- knobs -->
+  <g fill="url(#knob)">
+    <rect x="56" y="108" width="44" height="24" rx="9"/>
+    <rect x="106" y="78" width="44" height="24" rx="9"/>
+    <rect x="156" y="138" width="44" height="24" rx="9"/>
+  </g>
+  <!-- knob grip lines -->
+  <g stroke="#0a3b35" stroke-width="3" stroke-linecap="round" opacity=".5">
+    <line x1="64" y1="120" x2="92" y2="120"/>
+    <line x1="114" y1="90" x2="142" y2="90"/>
+    <line x1="164" y1="150" x2="192" y2="150"/>
+  </g>
+</svg>

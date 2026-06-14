@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AudioMixer
+GenericName=PipeWire Mic Console
+Comment=Per-channel virtual microphones, VU meters, faders and a noise gate for PipeWire
+Exec=AppRun
+Icon=AudioMixer
+Categories=AudioVideo;Audio;Mixer;
+Terminal=false
+StartupWMClass=AudioMixer
+Keywords=audio;mixer;pipewire;microphone;vu;fader;gate;
