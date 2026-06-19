@@ -2,6 +2,7 @@
 
 // ===== state ============================================================== //
 let channels = [];
+let buses = [];
 let master = 1.0;
 let masterMuted = false;
 let devices = [];
@@ -97,12 +98,14 @@ function init() {
   hideLogin();
   loadState();
   loadPresets();
+  refreshEventBtn();
 }
 
 async function loadState() {
   try {
     const data = await api('channels');
     channels = data.channels; master = data.master; masterMuted = !!data.master_muted;
+    buses = data.buses || [];
     packaged = !!data.packaged;   // AppImage build → no terminal, offer in-UI restart
     // link groups are UI-only — restore them from localStorage
     try {
@@ -157,6 +160,7 @@ function renderAll() {
   add.innerHTML = '<div class="add-inner"><div class="add-plus">+</div><div class="add-label">Add channel</div></div>';
   strip.appendChild(add);
   channels.forEach((c) => setGateVisual(c.mic_id));   // now the nodes are in the DOM
+  renderBuses();
   updateHeader();
   // keep a fader always selected so keyboard control + highlight are visible
   if (selected !== 'master' && !channels.some((c) => c.mic_id === selected)) {
@@ -217,6 +221,113 @@ function applyMaster(sliderVal) {
   throttle('m', () => api('master', { gain: g }).catch(() => {}));
 }
 
+// ===== buses (output virtual mics) + patchbay ============================ //
+const BUS_COLORS = ['#46e6c8', '#f5b14c', '#7aa2ff', '#ff7ab6', '#9b7bff', '#5fd17a', '#ff8a5f', '#e6c84a'];
+let busVu = {};
+let patchMic = null;     // mic_id currently being patched (click-to-connect)
+const busNode = (b) => 'am_bus_' + b.id;
+const busColor = (i) => BUS_COLORS[i % BUS_COLORS.length];
+
+function chipHtml(ch) {
+  const i = buses.findIndex((x) => x.id === ch.bus_id);
+  if (i >= 0) return `<span class="cdot" style="background:${busColor(i)}"></span>${esc(buses[i].name)}`;
+  return '<span class="cdot none"></span>patch…';
+}
+
+function renderBuses() {
+  const box = document.getElementById('buses'); if (!box) return;
+  box.innerHTML = '';
+  buses.forEach((b, i) => box.appendChild(makeBus(b, i)));
+  const add = document.createElement('button');
+  add.className = 'bus-add'; add.textContent = '+ New virtual mic';
+  add.onclick = addBus;
+  box.appendChild(add);
+  document.body.classList.toggle('patching', !!patchMic);
+}
+
+function makeBus(b, i) {
+  const d = document.createElement('div');
+  d.className = 'bus';
+  d.style.setProperty('--bc', busColor(i));
+  d.id = 'bus_' + b.id;
+  d.innerHTML = `
+    <span class="bus-dot"></span>
+    <div class="bus-name" id="busname_${b.id}" title="Double-click to rename"><strong>${esc(b.name)}</strong></div>
+    <div class="bus-meter"><div class="bus-vu g" id="busvu_${b.id}"></div></div>
+    <div class="bus-fader-wrap"><input type="range" class="bus-fader" min="0" max="100" value="${gainToSlider(b.gain)}" id="busfader_${b.id}"><span class="bus-db" id="busdb_${b.id}">${gainToDb(b.gain)}</span></div>
+    <button class="solobtn${b.solo ? ' on' : ''}" id="bussolo_${b.id}" title="Solo this virtual mic">S</button>
+    <button class="mutebtn${b.muted ? ' on' : ''}" id="busmute_${b.id}" title="Mute this virtual mic">M</button>
+    <button class="bus-del" id="busdel_${b.id}" title="Remove virtual mic">✕</button>`;
+  const f = d.querySelector('#busfader_' + b.id);
+  f.oninput = () => busVolume(b.id, +f.value);
+  f.onwheel = (e) => { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); f.value = Math.max(0, Math.min(100, +f.value + (e.deltaY < 0 ? 2 : -2))); busVolume(b.id, +f.value); };
+  d.querySelector('#bussolo_' + b.id).onclick = (e) => { e.stopPropagation(); busSolo(b.id); };
+  d.querySelector('#busmute_' + b.id).onclick = (e) => { e.stopPropagation(); busMute(b.id); };
+  d.querySelector('#busdel_' + b.id).onclick = (e) => { e.stopPropagation(); removeBus(b.id); };
+  d.querySelector('#busname_' + b.id).ondblclick = () => renameBus(b.id);
+  if (patchMic) d.onclick = (e) => { if (e.target.closest('button,input')) return; patchTo(b.id); };
+  return d;
+}
+
+function addBus() {
+  api('buses', { action: 'create' })
+    .then((r) => { buses = r.buses; renderAll(); })
+    .catch((e) => toast('Bus error: ' + e.message, 'err'));
+}
+function removeBus(id) {
+  api('buses', { action: 'remove', bus_id: id })
+    .then((r) => { buses = r.buses; channels.forEach((c) => { if (c.bus_id === id) c.bus_id = null; }); renderAll(); })
+    .catch((e) => toast('Bus error: ' + e.message, 'err'));
+}
+function renameBus(id) {
+  const el = document.getElementById('busname_' + id); const b = buses.find((x) => x.id === id);
+  if (!el || !b) return;
+  const inp = document.createElement('input');
+  inp.className = 'bus-name-edit'; inp.value = b.name;
+  el.innerHTML = ''; el.appendChild(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = (save) => {
+    if (done) return; done = true;
+    const v = save ? (inp.value.trim() || b.name) : b.name;
+    b.name = v;
+    if (save) api('buses', { action: 'rename', bus_id: id, name: v }).catch(() => {});
+    renderAll();   // chips reflect the new name
+  };
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+  inp.onblur = () => finish(true);
+}
+
+function busVolume(id, val) {
+  const b = buses.find((x) => x.id === id); if (!b) return;
+  deactivatePreset();
+  const g = sliderToGain(val); b.gain = g;
+  const db = document.getElementById('busdb_' + id); if (db) db.textContent = gainToDb(g);
+  throttle('bv_' + id, () => api('bus_volume', { bus_id: id, gain: g }).catch(() => {}));
+}
+function busMute(id) {
+  const b = buses.find((x) => x.id === id); if (!b) return;
+  deactivatePreset(); b.muted = !b.muted;
+  const btn = document.getElementById('busmute_' + id); if (btn) btn.classList.toggle('on', b.muted);
+  api('bus_mute', { bus_id: id, muted: b.muted }).catch(() => {});
+}
+function busSolo(id) {
+  const b = buses.find((x) => x.id === id); if (!b) return;
+  deactivatePreset(); b.solo = !b.solo; if (b.solo) b.muted = false;
+  const s = document.getElementById('bussolo_' + id); if (s) s.classList.toggle('on', b.solo);
+  const m = document.getElementById('busmute_' + id); if (m) m.classList.toggle('on', b.muted);
+  api('bus_solo', { bus_id: id, solo: b.solo }).catch(() => {});
+}
+
+function startPatch(mic_id) { patchMic = (patchMic === mic_id) ? null : mic_id; renderAll(); }
+function cancelPatch() { if (patchMic) { patchMic = null; renderAll(); } }
+function patchTo(bus_id) {
+  const ch = channels.find((c) => c.mic_id === patchMic); if (!ch) { cancelPatch(); return; }
+  const target = (ch.bus_id === bus_id) ? null : bus_id;   // click the assigned bus again = unpatch
+  ch.bus_id = target;
+  api('route', { mic_id: ch.mic_id, bus_id: target }).catch((e) => toast('Route error: ' + e.message, 'err'));
+  patchMic = null; deactivatePreset(); renderAll();
+}
+
 const LINK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M10 8H8a4 4 0 0 0 0 8h2"/><path d="M14 8h2a4 4 0 0 1 0 8h-2"/></svg>';
 const GEAR_ICON = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>';
 
@@ -255,6 +366,7 @@ function makeChannel(ch) {
       </div>
       <div class="knob-wrap"><button class="ng-gear" title="Gate settings" onclick="openNgCfg(event,'${ch.mic_id}')">${GEAR_ICON}</button><div class="gate-knob off" id="knob_${ch.mic_id}" title="Noise gate threshold — drag / wheel / [ ]"><i></i></div><span class="knob-lbl" id="ngval_${ch.mic_id}">NG</span></div>
     </div>
+    <div class="bus-chip-wrap"><button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button></div>
     <div class="ch-foot">
       <span class="badge ${s === 'ok' ? 'ok' : 'off'}" id="badge_${ch.mic_id}">${badge[s]}</span>
       <div class="foot-ctl">
@@ -397,6 +509,49 @@ function selectIface(ip) {
   document.getElementById('qrInfo').innerHTML = `http://${esc(ip)}:${esc(netinfo.port)} · PIN <b>${esc(netinfo.pin)}</b>`;
 }
 function closeQr() { document.getElementById('qrmodal').classList.remove('open'); }
+
+// ===== event mode (pro-audio card profile) =============================== //
+async function openEvent() {
+  let st;
+  try { st = await api('cards'); } catch (_) { toast('Cannot read sound cards', 'err'); return; }
+  renderEventCards(st);
+  document.getElementById('eventModal').classList.add('open');
+}
+function closeEvent() { document.getElementById('eventModal').classList.remove('open'); }
+function renderEventCards(st) {
+  const box = document.getElementById('eventCards');
+  const cards = (st && st.cards) || [];
+  if (!cards.length) { box.innerHTML = '<p class="hint-row">No sound card with a pro-audio profile was found.</p>'; return; }
+  box.innerHTML = cards.map((c) => {
+    const id = c.name.replace('alsa_card.', '');
+    const cap = c.inputs ? 'has inputs (mics)' : 'outputs only (HDMI)';
+    const inUse = st.target === c.name ? ' · in use now' : '';
+    const status = c.is_pro
+      ? '<span class="ev-on">● Pro Audio ON</span>'
+      : 'Normal · ' + esc(c.active_profile || '—');
+    const btn = c.is_pro
+      ? `<button class="btn stop" onclick="toggleEventCard('${esc(c.name)}',false)"><span class="lbl">Restore normal</span></button>`
+      : `<button class="btn ${c.inputs ? 'primary' : 'ghost'}" onclick="toggleEventCard('${esc(c.name)}',true)"><span class="lbl">Enable Pro Audio</span></button>`;
+    return `<div class="ev-row"><div class="ev-card">
+        <b>${esc(c.label || id)}${inUse}</b>
+        <small>${esc(cap)} · ${esc(id)}</small>
+        <small>${status}</small>
+      </div>${btn}</div>`;
+  }).join('');
+}
+async function toggleEventCard(card, on) {
+  try {
+    const r = await api('event_mode', { card, on });
+    renderEventCards(r.status);
+    refreshEventBtn(r.status);
+    toast(on ? 'Card switched to pro-audio' : 'Profile restored');
+  } catch (e) { toast('Profile switch failed: ' + e.message, 'err'); }
+}
+async function refreshEventBtn(st) {
+  if (!st) { try { st = await api('cards'); } catch (_) { return; } }
+  const b = document.getElementById('btnEvent');
+  if (b) b.classList.toggle('on', !!st.any_on);
+}
 function askClear() {
   if (!channels.length) { toast('No channels to remove'); return; }
   document.getElementById('clearModal').classList.add('open');
@@ -759,6 +914,8 @@ document.addEventListener('keydown', (e) => {
     document.getElementById('qrmodal').classList.remove('open');
     document.getElementById('quitModal').classList.remove('open');
     document.getElementById('restartModal').classList.remove('open');
+    document.getElementById('eventModal').classList.remove('open');
+    cancelPatch();
   }
   if (typing || document.getElementById('modal').classList.contains('open')) return;
   if (e.code === 'KeyL' && e.altKey && !e.ctrlKey) {        // global unlink
@@ -803,8 +960,8 @@ let connLost = false, pollFails = 0;
 async function pollLevels() {
   if (!authed || serverDown) return;     // serverDown = intentional UI shutdown
   try {
-    const { levels, master: m } = await api('levels');
-    applyLevels(levels, m);
+    const { levels, buses: busLv, master: m } = await api('levels');
+    applyLevels(levels, m, busLv);
     pollFails = 0;
     if (connLost) onReconnect();         // we were down — the backend is back
   } catch (e) {
@@ -850,7 +1007,7 @@ function setMeter(fillId, pkId, st, raw, isMaster) {
   return st.lvl;
 }
 
-function applyLevels(levels, mLevel) {
+function applyLevels(levels, mLevel, busLv) {
   channels.forEach((ch) => {
     const st = vu[ch.mic_id]; if (!st) return;
     const fill = document.getElementById('vu_' + ch.mic_id); if (!fill) return;
@@ -894,6 +1051,16 @@ function applyLevels(levels, mLevel) {
     } else { setBadge(badge, 'ok', 'live'); setChannelState(chEl, 'active'); }
   });
   setMeter('vuMaster', 'pkMaster', masterVu, mLevel || 0, true);
+  buses.forEach((b) => {
+    const fill = document.getElementById('busvu_' + b.id); if (!fill) return;
+    const st = busVu[b.id] || (busVu[b.id] = { lvl: 0, peak: 0 });
+    const raw = (busLv || {})[busNode(b)];
+    if (typeof raw !== 'number') { st.lvl *= 0.6; fill.style.width = st.lvl.toFixed(1) + '%'; return; }
+    const pct = rmsToPct(raw);
+    if (pct > st.lvl) st.lvl = pct; else st.lvl = st.lvl * 0.78 + pct * 0.22;
+    fill.style.width = st.lvl.toFixed(1) + '%';
+    fill.className = 'bus-vu ' + (st.lvl > 85 ? 'r' : st.lvl > 70 ? 'y' : 'g');
+  });
 }
 
 // update only the level-state classes, preserving kbsel/selected/linked etc.

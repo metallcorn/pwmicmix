@@ -380,6 +380,19 @@ body{
 .qr-info{font-family:var(--font-mono);font-size:13px;color:var(--txt-mut);text-align:center;padding:14px 0 2px}
 .qr-info b{color:var(--accent);font-weight:600}
 
+/* ===== event mode (pro-audio) ========================================== */
+#btnEvent.on{border-color:var(--amber);color:var(--amber);background:rgba(245,177,76,.12)}
+.ev-intro{font-size:12.5px;color:var(--txt-mut);line-height:1.55;margin-bottom:10px}
+.ev-steps{margin:0 0 12px;padding-left:18px;font-size:12.5px;color:var(--txt-mut);line-height:1.7}
+.ev-steps b{color:var(--txt)}
+.ev-warn{font-size:11.5px;color:var(--amber);background:rgba(245,177,76,.08);
+  border:0.5px solid rgba(245,177,76,.3);border-radius:9px;padding:9px 11px;margin-bottom:14px;line-height:1.5}
+.ev-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:0.5px solid var(--line)}
+.ev-row:last-child{border-bottom:none}
+.ev-card b{font-size:12.5px;color:var(--txt)}
+.ev-card small{display:block;font-size:11px;color:var(--txt-mut);margin-top:2px}
+.ev-on{color:var(--accent);font-weight:600}
+
 /* ===== login overlay ===================================================== */
 .login{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;padding:18px;
   background:radial-gradient(700px 400px at 50% 30%,#16202a,transparent 70%),rgba(5,7,9,.92);backdrop-filter:blur(10px)}
@@ -472,3 +485,38 @@ body{
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms!important;transition-duration:.05ms!important}
 }
+
+/* ===== buses (output virtual mics) + patchbay ========================== */
+.buses{display:flex;flex-direction:column;gap:6px;padding:8px 12px 14px}
+.bus{display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:11px;
+  background:linear-gradient(180deg,#181b21,#121419);border:0.5px solid var(--line-2);
+  border-left:3px solid var(--bc,#46e6c8);transition:background .15s}
+.bus-dot{width:10px;height:10px;border-radius:50%;background:var(--bc,#46e6c8);flex-shrink:0;box-shadow:0 0 8px var(--bc,#46e6c8)}
+.bus-name{min-width:110px;max-width:190px;font-size:13px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bus-meter{flex:1;height:10px;border-radius:5px;background:rgba(255,255,255,.05);overflow:hidden;min-width:70px}
+.bus-vu{height:100%;width:0%;border-radius:5px;background:var(--accent);transition:width .05s linear}
+.bus-vu.y{background:var(--amber)} .bus-vu.r{background:var(--red)}
+.bus-fader-wrap{display:flex;align-items:center;gap:8px;width:210px;flex-shrink:0}
+.bus-fader{flex:1;accent-color:var(--bc,#46e6c8);cursor:pointer}
+.bus-db{font:600 11px var(--font-mono);color:var(--txt-mut);min-width:50px;text-align:right}
+.bus-del{background:none;border:none;color:var(--txt-faint);cursor:pointer;font-size:14px;padding:2px 7px;border-radius:6px;flex-shrink:0}
+.bus-del:hover{background:rgba(255,90,90,.14);color:var(--red)}
+.bus-name-edit{font:600 13px var(--font-sans);background:#0d0f12;border:1px solid var(--accent);color:var(--txt);border-radius:6px;padding:2px 6px;width:160px}
+.bus-add{align-self:flex-start;margin-top:2px;background:none;border:0.5px dashed rgba(70,230,200,.4);
+  color:var(--accent);border-radius:9px;padding:8px 14px;font:500 12px var(--font-sans);cursor:pointer}
+.bus-add:hover{background:rgba(70,230,200,.08)}
+/* patch mode: bus bars become drop targets */
+body.patching .bus{cursor:pointer;border-left-width:5px}
+body.patching .bus:hover{background:linear-gradient(180deg,#1d2b2b,#141b1a)}
+body.patching .bus::after{content:"tap to patch";margin-left:auto;font-size:10px;color:var(--bc,#46e6c8);opacity:.8}
+/* strip → bus chip */
+.bus-chip-wrap{padding:0 8px 6px}
+.bus-chip{width:100%;display:flex;align-items:center;justify-content:center;gap:5px;
+  font:600 10px var(--font-sans);border:0.5px solid var(--line-2);background:rgba(255,255,255,.03);
+  color:var(--txt-mut);border-radius:7px;padding:4px 6px;cursor:pointer;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.bus-chip:hover{background:rgba(255,255,255,.07);color:var(--txt)}
+.bus-chip.unrouted{border-style:dashed;color:var(--txt-faint)}
+.bus-chip.patching{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 2px rgba(70,230,200,.3)}
+.cdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.cdot.none{background:var(--txt-faint)}

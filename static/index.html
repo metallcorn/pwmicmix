@@ -34,6 +34,7 @@
       <button class="btn run" id="btnRun" onclick="setEngine(true)" title="Start all mics" style="display:none"><span class="ico">▶</span></button>
       <button class="btn stop" id="btnStop" onclick="setEngine(false)" title="Stop all mics" style="display:none"><span class="ico">■</span></button>
       <button class="btn" id="btnAlign" onclick="alignGroup()" title="Align the selected link group to the anchor"><span class="lbl">Align</span></button>
+      <button class="btn" id="btnEvent" onclick="openEvent()" title="Event mode — switch a sound card to pro-audio">Pro</button>
       <button class="btn" id="btnQr" onclick="openQr()" title="Connect a phone (QR + PIN)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v7h-7" stroke-linecap="round"/></svg></button>
       <button class="btn" id="btnHelp" onclick="toggleHelp()" title="Keyboard shortcuts">?</button>
       <button class="btn clear" id="btnClear" onclick="askClear()" title="Remove all channels and virtual mics"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
@@ -45,6 +46,8 @@
   <div class="presetbar" id="presetbar"></div>
 
   <div class="strip" id="strip"></div>
+
+  <div class="buses" id="buses"></div>
 
   <div class="bottombar">
     <div class="bb">PipeWire <b>active</b> · source: <b id="devlabel">—</b></div>
@@ -138,6 +141,21 @@
       <button class="btn ghost" onclick="closeClear()">Cancel</button>
       <button class="btn stop" id="clearConfirm" onclick="doClear()"><span class="lbl">Remove all</span></button>
     </div>
+  </div>
+</div>
+
+<!-- event mode (pro-audio card profile) -->
+<div class="modal-bg" id="eventModal">
+  <div class="modal">
+    <h3>Event mode · Pro Audio <button class="x" onclick="closeEvent()">✕</button></h3>
+    <p class="ev-intro">Most sound cards appear as one stereo input. <b>Pro Audio</b> splits a card into one port per channel — that's what lets each channel become its own microphone.</p>
+    <ol class="ev-steps">
+      <li>Enable Pro Audio on the card your inputs are on (the one marked <b>has inputs</b>).</li>
+      <li>Close this, click <b>+ Ch</b> and add your channels from the new per-channel ports.</li>
+      <li>Click <b>Restore normal</b> here when you're done.</li>
+    </ol>
+    <p class="ev-warn">⚠️ While a card is in Pro Audio, its normal stereo output (e.g. laptop speakers) is muted until you restore it. The profile auto-restores on restart if no channels are running.</p>
+    <div id="eventCards"></div>
   </div>
 </div>
 
