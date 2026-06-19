@@ -230,8 +230,8 @@ const busColor = (i) => BUS_COLORS[i % BUS_COLORS.length];
 
 function chipHtml(ch) {
   const i = buses.findIndex((x) => x.id === ch.bus_id);
-  if (i >= 0) return `<span class="cdot" style="background:${busColor(i)}"></span>${esc(buses[i].name)}`;
-  return '<span class="cdot none"></span>patch…';
+  if (i >= 0) return `<span class="cdot" style="background:${busColor(i)}"></span><span class="chip-name">${esc(buses[i].name)}</span>`;
+  return '<span class="cdot none"></span><span class="chip-name">patch…</span>';
 }
 
 function renderBuses() {
@@ -372,7 +372,7 @@ function makeChannel(ch) {
       </div>
       <div class="knob-wrap"><button class="ng-gear" title="Gate settings" onclick="openNgCfg(event,'${ch.mic_id}')">${GEAR_ICON}</button><div class="gate-knob off" id="knob_${ch.mic_id}" title="Noise gate threshold — drag / wheel / [ ]"><i></i></div><span class="knob-lbl" id="ngval_${ch.mic_id}">NG</span></div>
     </div>
-    <div class="bus-chip-wrap"><button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button>${ch.bus_id != null ? `<button class="chip-x" title="Unpatch from bus" onclick="unpatch('${ch.mic_id}')">✕</button>` : ''}</div>
+    <div class="bus-chip-wrap"><button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" title="${ch.bus_id != null ? esc((buses.find((b) => b.id === ch.bus_id) || {}).name || '') : 'Patch to a virtual mic'}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button>${ch.bus_id != null ? `<button class="chip-x" title="Unpatch from bus" onclick="unpatch('${ch.mic_id}')">✕</button>` : ''}</div>
     <div class="ch-foot">
       <span class="badge ${s === 'ok' ? 'ok' : 'off'}" id="badge_${ch.mic_id}">${badge[s]}</span>
       <div class="foot-ctl">
