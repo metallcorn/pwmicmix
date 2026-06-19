@@ -220,10 +220,11 @@ class GateMonitor:
     open/close without measuring its own (gated) output. Keyed by mic_id; each
     meter records the channel's source device port via explicit link."""
 
-    def __init__(self):
+    def __init__(self, idx_base: int = 20000):
         self._meters: dict[str, _ProbeMeter] = {}
         self._lock = threading.Lock()
         self._counter = 0
+        self._base = idx_base   # distinct probe-node id range per instance (avoid name clashes)
 
     def sync(self, targets: dict[str, tuple[str, list[str]]]) -> None:
         """targets: {mic_id: (device_node, [port names])}."""
@@ -234,7 +235,7 @@ class GateMonitor:
             for k in want - have:
                 self._counter += 1
                 dev, ports = targets[k]
-                m = _ProbeMeter(20000 + self._counter, dev, ports)
+                m = _ProbeMeter(self._base + self._counter, dev, ports)
                 self._meters[k] = m
                 m.start()
         for m in to_stop:
@@ -244,6 +245,11 @@ class GateMonitor:
         with self._lock:
             m = self._meters.get(mic_id)
         return m.snapshot() if m else 0.0
+
+    def levels(self) -> dict[str, float]:
+        with self._lock:
+            items = list(self._meters.items())
+        return {k: m.snapshot() for k, m in items}
 
     def stop_all(self) -> None:
         with self._lock:

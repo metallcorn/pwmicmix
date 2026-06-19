@@ -29,6 +29,7 @@ DATA_DIR = os.environ.get("AUDIOMIXER_DATA", HERE)
 os.makedirs(DATA_DIR, exist_ok=True)
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
 PRESETS_FILE = os.path.join(DATA_DIR, "presets.json")
+EVENT_FILE = os.path.join(DATA_DIR, "event_mode.json")   # Event-mode: card -> profile to restore
 STATIC_DIR = os.path.join(HERE, "static")
 PORT = 8723
 # AppRun sets this for the packaged (AppImage) build: it changes how the UI
@@ -41,6 +42,11 @@ def _find_free_port(start: int, span: int = 20) -> int:
     stale instance) falls through to a neighbour instead of crashing on launch."""
     for p in range(start, start + span):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # Match Werkzeug's dev server (allow_reuse_address): SO_REUSEADDR lets
+            # us re-bind a port still in TIME_WAIT after a Ctrl-C, instead of
+            # spuriously skipping to a neighbour. It still fails on a port that's
+            # actively being listened on, so real conflicts are still avoided.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("0.0.0.0", p))
                 return p
@@ -154,9 +160,13 @@ class Mixer:
         self.lock = threading.RLock()
         self.monitor = LevelMonitor()
         self.gate_mon = GateMonitor()
+        self.buses: dict[int, pw.Bus] = {}
+        self.next_bus_id = 1
+        self.strip_mon = GateMonitor(idx_base=30000)   # explicit-link meters for hidden strips
         self._relink_stop = threading.Event()
         self._relink_thread: threading.Thread | None = None
         self._gate_thread: threading.Thread | None = None
+        self.event_orig = self._load_event()   # card -> profile to restore (Event mode)
 
     def eff_master(self) -> float:
         """Master gain actually applied — 0 when the master is muted."""
@@ -169,6 +179,102 @@ class Mixer:
         for c in self.channels.values():
             c.muted_by_solo = any_solo and not c.solo
             c._apply_gain(self.eff_master())
+
+    # -- buses (output virtual mics) -------------------------------------- #
+    def _refresh_bus_solo_locked(self) -> None:
+        any_solo = any(b.solo for b in self.buses.values() if b.active)
+        for b in self.buses.values():
+            b.muted_by_solo = any_solo and not b.solo
+            b._apply_gain()
+
+    def buses_payload(self) -> list[dict]:
+        return [b.to_dict() for b in sorted(self.buses.values(), key=lambda b: b.id)]
+
+    def new_bus(self, name: str) -> "pw.Bus":
+        bid = self.next_bus_id
+        self.next_bus_id += 1
+        b = pw.Bus(bid, name or f"Mic {bid}")
+        self.buses[bid] = b
+        b.start()
+        return b
+
+    def route_channel(self, ch: "pw.Channel", bus_id) -> None:
+        """Point a strip at a bus (id) or None (silent); re-links accordingly."""
+        old = self.buses.get(ch.bus_id) if ch.bus_id is not None else None
+        if old:
+            ch.unroute(old)
+        new = self.buses.get(bus_id) if bus_id is not None else None
+        if new:
+            ch.route_to(new)
+        else:
+            ch.bus_id = None
+        ch._apply_gain(self.eff_master())
+
+    def ensure_routes(self, links) -> None:
+        for ch in self.channels.values():
+            if ch.active and ch.bus_id in self.buses:
+                bus = self.buses[ch.bus_id]
+                if not ch.bus_links_ok(bus, links):
+                    ch.route_to(bus)
+
+    def sync_meters(self) -> None:
+        """Reconcile meters: buses via --target (Audio/Source); strips via
+        explicit-link on their hidden output port."""
+        with self.lock:
+            bus_t = {b.source_node: b.source_node for b in self.buses.values() if b.active}
+            strip_t = {c.mic_id: (c.mic_id, ["output_MONO"])
+                       for c in self.channels.values() if c.active}
+        self.monitor.sync(bus_t)
+        self.strip_mon.sync(strip_t)
+
+    # -- Event mode (Pro Audio card profile) ------------------------------ #
+    def _load_event(self) -> dict:
+        try:
+            with open(EVENT_FILE) as f:
+                d = json.load(f)
+            return {k: v for k, v in d.get("cards", {}).items() if isinstance(v, str)}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_event(self) -> None:
+        try:
+            with open(EVENT_FILE, "w") as f:
+                json.dump({"cards": self.event_orig}, f, indent=2)
+        except OSError:
+            pass
+
+    def target_card(self) -> str:
+        """The card the active channels are using — what the toggle should flip."""
+        for c in self.channels.values():
+            if c.active:
+                card = pw.card_for_device(c.device)
+                if card:
+                    return card
+        return ""
+
+    def event_status(self) -> dict:
+        cards = [c for c in pw.list_cards() if c["has_pro"]]
+        for c in cards:
+            c["is_pro"] = (c["active_profile"] == pw.PRO_PROFILE)
+            c["event_on"] = c["name"] in self.event_orig
+            c["saved_profile"] = self.event_orig.get(c["name"], "")
+        return {"cards": cards, "target": self.target_card(), "any_on": bool(self.event_orig)}
+
+    def enable_event(self, card: str) -> None:
+        with self.lock:
+            cur = pw.card_profile(card)
+            # remember what to go back to (but never memorise pro-audio as "original")
+            if card not in self.event_orig and cur and cur != pw.PRO_PROFILE:
+                self.event_orig[card] = cur
+            pw.set_card_profile(card, pw.PRO_PROFILE)
+            self._save_event()
+
+    def disable_event(self, card: str) -> None:
+        with self.lock:
+            orig = self.event_orig.pop(card, None) or pw.fallback_profile(card)
+            if orig:
+                pw.set_card_profile(card, orig)
+            self._save_event()
 
     # -- noise gate: open/close each gated channel from its PRE-gain input ---- #
     def start_gate(self) -> None:
@@ -218,22 +324,29 @@ class Mixer:
         while not self._relink_stop.wait(1.5):
             with self.lock:
                 active = [c for c in self.channels.values() if c.active]
-            if not active:
+                live_buses = [b for b in self.buses.values() if b.active]
+            if not active and not live_buses:
                 continue
-            # recreate any loopback that died (owned process gone, or adopted
-            # node disappeared)
             try:
-                alive = pw.existing_mic_nodes()
+                alive_s = pw.existing_mic_nodes()
+                alive_b = pw.existing_bus_nodes()
             except Exception:
-                alive = None
-            for ch in active:
+                alive_s = alive_b = None
+            for b in live_buses:               # recreate dead buses
+                dead = (b.proc.poll() is not None) if b.proc else (
+                    alive_b is not None and b.source_node not in alive_b)
+                if dead:
+                    try:
+                        b.start()
+                    except Exception:
+                        pass
+            for ch in active:                  # recreate dead strips
                 dead = (ch.proc.poll() is not None) if ch.proc else (
-                    alive is not None and ch.mic_id not in alive)
+                    alive_s is not None and ch.mic_id not in alive_s)
                 if dead:
                     try:
                         ch.start()
                         ch.set_gain(ch.gain, self.eff_master())
-                        self.monitor.add(ch.mic_id, ch.mic_id)
                     except Exception:
                         pass
             try:
@@ -246,6 +359,8 @@ class Mixer:
                     ch.ensure_links(outs, links)
                 except Exception:
                     pass
+            self.ensure_routes(links)          # restore strip→bus links if dropped
+            self.sync_meters()
 
     # -- persistence ------------------------------------------------------ #
     def save(self) -> None:
@@ -254,7 +369,9 @@ class Mixer:
                 "master": self.master,
                 "master_muted": self.master_muted,
                 "next_id": self.next_id,
+                "next_bus_id": self.next_bus_id,
                 "channels": [c.to_dict() for c in self.channels.values()],
+                "buses": [b.to_dict() for b in self.buses.values()],
             }
         try:
             with open(STATE_FILE, "w") as f:
@@ -277,27 +394,53 @@ class Mixer:
         self.master = data.get("master", 1.0)
         self.master_muted = data.get("master_muted", False)
         self.next_id = data.get("next_id", 1)
+        self.next_bus_id = data.get("next_bus_id", 1)
         chans = data.get("channels", [])
-        # Keep the nodes of active channels alive across restart so we can adopt
-        # them (apps keep their selection); kill everything else stray.
+        buses = data.get("buses", [])
+        # Keep our nodes (strips + buses) alive across restart so we can adopt them.
         keep = set()
         for d in chans:
             if d.get("active", True):
-                keep.add(f"{pw.VIRT_PREFIX}{d['id']}")
+                keep.add(f"{pw.STRIP_PREFIX}{d['id']}")
                 keep.add(f"{pw.CAP_PREFIX}{d['id']}")
+        for d in buses:
+            if d.get("active", True):
+                keep.add(f"{pw.BUS_PREFIX}{d['id']}")
+                keep.add(f"{pw.BUSCAP_PREFIX}{d['id']}")
         pw.cleanup_orphans(keep)
-        existing = pw.existing_mic_nodes()
+        existing_strips = pw.existing_mic_nodes()
+        existing_buses = pw.existing_bus_nodes()
+        for d in buses:                        # buses first — strips route into them
+            b = pw.Bus.from_dict(d)
+            self.buses[b.id] = b
+            if b.active:
+                b.adopt() if b.source_node in existing_buses else b.start()
         for d in chans:
             ch = pw.Channel.from_dict(d)
             self.channels[ch.id] = ch
             if ch.active:
-                if ch.mic_id in existing:
-                    ch.adopt(self.eff_master())        # node survived restart — reuse it
+                if ch.mic_id in existing_strips:
+                    ch.adopt(self.eff_master())
                 else:
                     ch.start()
                     ch.set_gain(ch.gain, self.eff_master())
-                self.monitor.add(ch.mic_id, ch.mic_id)
-        self._refresh_solo_locked()   # honour any persisted solo state
+            # migration: a strip with no/invalid bus gets its own bus (1:1 like before)
+            if ch.bus_id is None or ch.bus_id not in self.buses:
+                ch.bus_id = self.new_bus(ch.name).id
+            if ch.active:
+                ch.route_to(self.buses[ch.bus_id])
+        self._refresh_solo_locked()
+        self._refresh_bus_solo_locked()
+        self.sync_meters()
+        # Crash-safe Event mode: if a card was left in pro-audio but nothing is
+        # using it anymore (no active channels survived), put the profile back —
+        # don't strand the card in pro-audio (which kills normal speaker output).
+        if self.event_orig and not any(c.active for c in self.channels.values()):
+            for card, orig in list(self.event_orig.items()):
+                if orig:
+                    pw.set_card_profile(card, orig)
+            self.event_orig.clear()
+            self._save_event()
 
     # -- helpers ---------------------------------------------------------- #
     def _by_mic(self, mic_id: str) -> pw.Channel | None:
@@ -395,6 +538,7 @@ def api_presets_set():
 @app.get("/api/channels")
 def api_channels():
     return jsonify({"channels": mixer.channels_payload(),
+                    "buses": mixer.buses_payload(),
                     "master": round(mixer.master, 4),
                     "master_muted": mixer.master_muted,
                     "packaged": PACKAGED,
@@ -425,28 +569,30 @@ def api_start():
             mixer.channels[cid] = ch
             ch.start()
             ch.set_gain(ch.gain, mixer.eff_master())
-            mixer.monitor.add(ch.mic_id, ch.mic_id)
-            created.append(ch.to_dict())
+            created.append(ch.to_dict())     # unrouted (silent) until patched to a bus
+        mixer.sync_meters()
     mixer.save()
     return jsonify({"created": created})
 
 
 @app.get("/api/levels")
 def api_levels():
-    levels = mixer.monitor.levels()
-    # overlay channel state: muted / off / no_route take priority over the raw
-    # meter value ("no_signal" from the monitor means routed-but-silent).
+    levels = mixer.strip_mon.levels()      # strips, keyed by mic_id (am_strip_*)
+    bus_levels = mixer.monitor.levels()    # buses, keyed by source_node (am_bus_*)
     with mixer.lock:
         for c in mixer.channels.values():
-            if not c.active:
-                levels[c.mic_id] = "off"
+            if not c.active or c.bus_id is None:
+                levels[c.mic_id] = "off"       # off, or not patched to any bus
             elif c.muted or c.muted_by_solo:
                 levels[c.mic_id] = "muted"
             elif not c.route_ok:
                 levels[c.mic_id] = "no_route"
-        active_vals = [v for v in levels.values() if isinstance(v, (int, float))]
+        for b in mixer.buses.values():
+            if b.muted or b.muted_by_solo:
+                bus_levels[b.source_node] = "muted"
+        active_vals = [v for v in bus_levels.values() if isinstance(v, (int, float))]
     master_level = max(active_vals) if active_vals else 0.0
-    return jsonify({"levels": levels, "master": round(master_level, 4)})
+    return jsonify({"levels": levels, "buses": bus_levels, "master": round(master_level, 4)})
 
 
 @app.post("/api/volume")
@@ -557,6 +703,117 @@ def api_master_mute():
     return jsonify({"ok": True, "master_muted": mixer.master_muted})
 
 
+@app.post("/api/buses")
+def api_buses():
+    """Create / rename / remove a bus (virtual mic). Body: {action, name?, bus_id?}."""
+    body = request.get_json(force=True)
+    action = body.get("action", "create")
+    with mixer.lock:
+        if action == "create":
+            mixer.new_bus(body.get("name", ""))
+        elif action == "rename":
+            b = mixer.buses.get(body.get("bus_id"))
+            if not b:
+                return jsonify({"error": "unknown bus"}), 404
+            b.rename((body.get("name") or b.name).strip() or b.name)
+        elif action == "remove":
+            b = mixer.buses.pop(body.get("bus_id"), None)
+            if not b:
+                return jsonify({"error": "unknown bus"}), 404
+            for ch in mixer.channels.values():        # unpatch strips that fed it
+                if ch.bus_id == b.id:
+                    ch.bus_id = None
+                    ch._apply_gain(mixer.eff_master())
+            b.stop()
+        else:
+            return jsonify({"error": "bad action"}), 400
+        mixer.sync_meters()
+    mixer.save()
+    return jsonify({"ok": True, "buses": mixer.buses_payload()})
+
+
+@app.post("/api/route")
+def api_route():
+    """Patch a strip to a bus (or null). Body: {mic_id, bus_id|null}."""
+    body = request.get_json(force=True)
+    with mixer.lock:
+        ch = mixer._by_mic(body["mic_id"])
+        if not ch:
+            return jsonify({"error": "unknown mic"}), 404
+        bus_id = body.get("bus_id")
+        if bus_id is not None and bus_id not in mixer.buses:
+            return jsonify({"error": "unknown bus"}), 404
+        mixer.route_channel(ch, bus_id)
+    mixer.save()
+    return jsonify({"ok": True, "mic_id": ch.mic_id, "bus_id": ch.bus_id})
+
+
+@app.post("/api/bus_volume")
+def api_bus_volume():
+    body = request.get_json(force=True)
+    with mixer.lock:
+        b = mixer.buses.get(body.get("bus_id"))
+        if not b:
+            return jsonify({"error": "unknown bus"}), 404
+        b.set_gain(float(body["gain"]))
+    mixer.save()
+    return jsonify({"ok": True, "gain": round(b.gain, 4)})
+
+
+@app.post("/api/bus_mute")
+def api_bus_mute():
+    body = request.get_json(force=True)
+    with mixer.lock:
+        b = mixer.buses.get(body.get("bus_id"))
+        if not b:
+            return jsonify({"error": "unknown bus"}), 404
+        b.muted = bool(body.get("muted", not b.muted))
+        b._apply_gain()
+    mixer.save()
+    return jsonify({"ok": True, "muted": b.muted})
+
+
+@app.post("/api/bus_solo")
+def api_bus_solo():
+    body = request.get_json(force=True)
+    with mixer.lock:
+        b = mixer.buses.get(body.get("bus_id"))
+        if not b:
+            return jsonify({"error": "unknown bus"}), 404
+        b.solo = bool(body.get("solo", not b.solo))
+        if b.solo:
+            b.muted = False
+        mixer._refresh_bus_solo_locked()
+    mixer.save()
+    return jsonify({"ok": True, "solo": b.solo})
+
+
+@app.get("/api/cards")
+def api_cards():
+    """Sound cards that have a pro-audio profile, with their live active profile
+    and whether Event mode is on for each (reads the real card state)."""
+    return jsonify(mixer.event_status())
+
+
+@app.post("/api/event_mode")
+def api_event_mode():
+    """Toggle a card's pro-audio profile. Body: {on: bool, card?}. Without `card`
+    we use the card the active channels are on, or the sole pro-capable card."""
+    body = request.get_json(force=True)
+    on = bool(body.get("on"))
+    card = body.get("card") or mixer.target_card()
+    if not card:
+        pros = [c["name"] for c in pw.list_cards() if c["has_pro"]]
+        card = pros[0] if len(pros) == 1 else ""
+    if not card:
+        return jsonify({"error": "no_card"}), 400
+    if on:
+        mixer.enable_event(card)
+    else:
+        mixer.disable_event(card)
+    return jsonify({"ok": True, "card": card, "status": mixer.event_status()})
+
+
 @app.post("/api/toggle")
 def api_toggle():
     body = request.get_json(force=True)
@@ -569,10 +826,11 @@ def api_toggle():
         if want and not ch.active:
             ch.start()
             ch.set_gain(ch.gain, mixer.eff_master())
-            mixer.monitor.add(ch.mic_id, ch.mic_id)
+            if ch.bus_id in mixer.buses:
+                ch.route_to(mixer.buses[ch.bus_id])
         elif not want and ch.active:
-            mixer.monitor.remove(ch.mic_id)
             ch.stop()
+        mixer.sync_meters()
     mixer.save()
     return jsonify({"ok": True, "active": ch.active})
 
@@ -611,9 +869,9 @@ def api_remove():
         ch = mixer._by_mic(mic_id)
         if not ch:
             return jsonify({"error": "unknown mic"}), 404
-        mixer.monitor.remove(ch.mic_id)
         ch.stop()
         del mixer.channels[ch.id]
+        mixer.sync_meters()
     mixer.save()
     return jsonify({"ok": True})
 
@@ -634,10 +892,11 @@ def api_engine():
             if want and not ch.active:
                 ch.start()
                 ch.set_gain(ch.gain, mixer.eff_master())
-                mixer.monitor.add(ch.mic_id, ch.mic_id)
+                if ch.bus_id in mixer.buses:
+                    ch.route_to(mixer.buses[ch.bus_id])
             elif not want and ch.active:
-                mixer.monitor.remove(ch.mic_id)
                 ch.stop()
+        mixer.sync_meters()
         running = any(c.active for c in mixer.channels.values())
     mixer.save()
     return jsonify({"ok": True, "running": running,
