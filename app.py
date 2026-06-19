@@ -218,11 +218,13 @@ class Mixer:
                     ch.route_to(bus)
 
     def sync_meters(self) -> None:
-        """Reconcile meters: buses via --target (Audio/Source); strips via
-        explicit-link on their hidden output port."""
+        """Reconcile meters. Buses: --target on the Audio/Source (post-everything
+        output). Strips: PRE-gain input metering by explicit-link on the source
+        device port — so the meter shows incoming signal even when the strip is
+        muted/gated (you see audio is arriving; mute just greys the strip)."""
         with self.lock:
             bus_t = {b.source_node: b.source_node for b in self.buses.values() if b.active}
-            strip_t = {c.mic_id: (c.mic_id, ["output_MONO"])
+            strip_t = {c.mic_id: (c.device, [c.port])
                        for c in self.channels.values() if c.active}
         self.monitor.sync(bus_t)
         self.strip_mon.sync(strip_t)
@@ -581,12 +583,13 @@ def api_levels():
     bus_levels = mixer.monitor.levels()    # buses, keyed by source_node (am_bus_*)
     with mixer.lock:
         for c in mixer.channels.values():
-            if not c.active or c.bus_id is None:
-                levels[c.mic_id] = "off"       # off, or not patched to any bus
-            elif c.muted or c.muted_by_solo:
-                levels[c.mic_id] = "muted"
+            if not c.active:
+                levels[c.mic_id] = "off"
             elif not c.route_ok:
                 levels[c.mic_id] = "no_route"
+            # else: leave the raw PRE-gain input level. The UI greys muted /
+            # solo-silenced / unrouted strips but keeps the meter live so you can
+            # see signal is arriving.
         for b in mixer.buses.values():
             if b.muted or b.muted_by_solo:
                 bus_levels[b.source_node] = "muted"
@@ -908,9 +911,13 @@ def api_stop():
     """Remove ALL virtual microphones and their definitions (full clear)."""
     with mixer.lock:
         mixer.monitor.stop_all()
+        mixer.strip_mon.stop_all()
         for ch in list(mixer.channels.values()):
             ch.stop()
         mixer.channels.clear()
+        for b in list(mixer.buses.values()):
+            b.stop()
+        mixer.buses.clear()
     mixer.save()
     return jsonify({"ok": True})
 

@@ -497,7 +497,16 @@ body{
 .bus-vu{height:100%;width:0%;border-radius:5px;background:var(--accent);transition:width .05s linear}
 .bus-vu.y{background:var(--amber)} .bus-vu.r{background:var(--red)}
 .bus-fader-wrap{display:flex;align-items:center;gap:8px;width:210px;flex-shrink:0}
-.bus-fader{flex:1;accent-color:var(--bc,#46e6c8);cursor:pointer}
+/* same look as the channel fader (.fader), just horizontal */
+.bus-fader{-webkit-appearance:none;appearance:none;flex:1;height:14px;background:transparent;cursor:pointer}
+.bus-fader::-webkit-slider-runnable-track{height:6px;border-radius:3px;
+  background:linear-gradient(90deg,#13171c,#2b333c);box-shadow:inset 0 0 0 0.5px var(--line)}
+.bus-fader::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:24px;border-radius:5px;
+  background:linear-gradient(180deg,#f0f3f7,#b3bbc4);border:0.5px solid #6a727c;
+  box-shadow:0 2px 6px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.7);margin-top:-9px;cursor:grab}
+.bus-fader::-webkit-slider-thumb:active{cursor:grabbing}
+.bus-fader::-moz-range-track{height:6px;border-radius:3px;background:linear-gradient(90deg,#13171c,#2b333c)}
+.bus-fader::-moz-range-thumb{width:14px;height:24px;border-radius:5px;background:linear-gradient(180deg,#f0f3f7,#b3bbc4);border:0.5px solid #6a727c;cursor:grab}
 .bus-db{font:600 11px var(--font-mono);color:var(--txt-mut);min-width:50px;text-align:right}
 .bus-del{background:none;border:none;color:var(--txt-faint);cursor:pointer;font-size:14px;padding:2px 7px;border-radius:6px;flex-shrink:0}
 .bus-del:hover{background:rgba(255,90,90,.14);color:var(--red)}
@@ -510,8 +519,11 @@ body.patching .bus{cursor:pointer;border-left-width:5px}
 body.patching .bus:hover{background:linear-gradient(180deg,#1d2b2b,#141b1a)}
 body.patching .bus::after{content:"tap to patch";margin-left:auto;font-size:10px;color:var(--bc,#46e6c8);opacity:.8}
 /* strip → bus chip */
-.bus-chip-wrap{padding:0 8px 6px}
-.bus-chip{width:100%;display:flex;align-items:center;justify-content:center;gap:5px;
+.bus-chip-wrap{display:flex;gap:4px;align-items:stretch;padding:0 8px 6px}
+.chip-x{flex:0 0 auto;border:0.5px solid var(--line-2);background:rgba(255,255,255,.03);color:var(--txt-faint);
+  border-radius:7px;padding:0 7px;font-size:10px;cursor:pointer}
+.chip-x:hover{background:rgba(255,90,90,.14);color:var(--red);border-color:rgba(255,90,90,.35)}
+.bus-chip{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;
   font:600 10px var(--font-sans);border:0.5px solid var(--line-2);background:rgba(255,255,255,.03);
   color:var(--txt-mut);border-radius:7px;padding:4px 6px;cursor:pointer;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}

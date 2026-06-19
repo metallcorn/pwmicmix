@@ -327,6 +327,12 @@ function patchTo(bus_id) {
   api('route', { mic_id: ch.mic_id, bus_id: target }).catch((e) => toast('Route error: ' + e.message, 'err'));
   patchMic = null; deactivatePreset(); renderAll();
 }
+function unpatch(mic_id) {
+  const ch = channels.find((c) => c.mic_id === mic_id); if (!ch) return;
+  ch.bus_id = null;
+  api('route', { mic_id, bus_id: null }).catch((e) => toast('Route error: ' + e.message, 'err'));
+  deactivatePreset(); renderAll();
+}
 
 const LINK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M10 8H8a4 4 0 0 0 0 8h2"/><path d="M14 8h2a4 4 0 0 1 0 8h-2"/></svg>';
 const GEAR_ICON = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>';
@@ -366,7 +372,7 @@ function makeChannel(ch) {
       </div>
       <div class="knob-wrap"><button class="ng-gear" title="Gate settings" onclick="openNgCfg(event,'${ch.mic_id}')">${GEAR_ICON}</button><div class="gate-knob off" id="knob_${ch.mic_id}" title="Noise gate threshold — drag / wheel / [ ]"><i></i></div><span class="knob-lbl" id="ngval_${ch.mic_id}">NG</span></div>
     </div>
-    <div class="bus-chip-wrap"><button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button></div>
+    <div class="bus-chip-wrap"><button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button>${ch.bus_id != null ? `<button class="chip-x" title="Unpatch from bus" onclick="unpatch('${ch.mic_id}')">✕</button>` : ''}</div>
     <div class="ch-foot">
       <span class="badge ${s === 'ok' ? 'ok' : 'off'}" id="badge_${ch.mic_id}">${badge[s]}</span>
       <div class="foot-ctl">
@@ -559,7 +565,7 @@ function askClear() {
 function closeClear() { document.getElementById('clearModal').classList.remove('open'); }
 async function doClear() {
   await withSpin(document.getElementById('clearConfirm'), async () => {
-    try { await api('stop', {}); channels = []; renderAll(); }
+    try { await api('stop', {}); channels = []; buses = []; renderAll(); }
     catch (e) { toast('Error: ' + e.message, 'err'); }
   });
   closeClear();
@@ -1008,22 +1014,25 @@ function setMeter(fillId, pkId, st, raw, isMaster) {
 }
 
 function applyLevels(levels, mLevel, busLv) {
+  const soloActive = channels.some((c) => c.solo);
   channels.forEach((ch) => {
     const st = vu[ch.mic_id]; if (!st) return;
+    if (!Number.isFinite(st.lvl)) st.lvl = 0;       // recover from any prior NaN
+    if (!Number.isFinite(st.peak)) st.peak = 0;
     const fill = document.getElementById('vu_' + ch.mic_id); if (!fill) return;
     const led = document.getElementById('led_' + ch.mic_id);
     const badge = document.getElementById('badge_' + ch.mic_id);
     const chEl = document.getElementById('ch_' + ch.mic_id);
     const raw = levels[ch.mic_id];
+    const silenced = ch.muted || (soloActive && !ch.solo);   // output is cut…
+    const unrouted = ch.bus_id == null;
 
-    if (raw === 'off' || raw === 'muted' || !ch.active) {
+    if (raw === 'off' || !ch.active) {
       st.lvl = 0; st.peak = 0;
       fill.style.setProperty('--lvl', '0%'); fill.className = 'vu-fill g';
       const pk = document.getElementById('pk_' + ch.mic_id); if (pk) pk.style.setProperty('--peak', '0%');
       if (led) led.className = 'led';
-      if (raw === 'muted') { setBadge(badge, 'mute', 'muted'); setChannelState(chEl, 'muted'); }
-      else { setBadge(badge, 'off', 'off'); setChannelState(chEl, 'muted'); }
-      st.clipStart = 0;
+      setBadge(badge, 'off', 'off'); setChannelState(chEl, 'muted'); st.clipStart = 0;
       return;
     }
     if (raw === 'no_route') {                 // source device/route is gone — real problem
@@ -1037,10 +1046,28 @@ function applyLevels(levels, mLevel, busLv) {
       st.lvl *= 0.6; st.peak *= 0.97;
       fill.style.setProperty('--lvl', st.lvl.toFixed(1) + '%');
       if (led) led.className = 'led';
-      setBadge(badge, 'off', 'silent'); setChannelState(chEl, 'active'); st.clipStart = 0;
+      setBadge(badge, 'off', 'silent'); setChannelState(chEl, silenced ? 'muted' : 'active'); st.clipStart = 0;
       return;
     }
+    if (typeof raw !== 'number') {            // level not reported yet — quiet, don't NaN the meter
+      st.lvl *= 0.6; fill.style.setProperty('--lvl', st.lvl.toFixed(1) + '%');
+      if (led) led.className = 'led';
+      setBadge(badge, 'off', 'silent'); setChannelState(chEl, silenced ? 'muted' : 'active'); st.clipStart = 0;
+      return;
+    }
+    // numeric PRE-gain input level — ALWAYS show the meter, even when muted, so
+    // you can see signal is arriving; mute/solo-off/unrouted just grey the strip.
     const lvl = setMeter('vu_' + ch.mic_id, 'pk_' + ch.mic_id, st, raw);
+    if (silenced) {
+      if (led) led.className = 'led';
+      setBadge(badge, 'mute', ch.muted ? 'muted' : 'solo'); setChannelState(chEl, 'muted'); st.clipStart = 0;
+      return;
+    }
+    if (unrouted) {                           // live input, but not patched to a bus
+      if (led) led.className = 'led';
+      setBadge(badge, 'off', 'no bus'); setChannelState(chEl, 'muted'); st.clipStart = 0;
+      return;
+    }
     const clipping = lvl > 92;
     if (led) led.className = 'led' + (clipping ? ' on' : '');
     if (clipping) { if (!st.clipStart) st.clipStart = performance.now(); } else st.clipStart = 0;
