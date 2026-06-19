@@ -13,6 +13,7 @@ native pw-* utilities exclusively.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 
@@ -24,6 +25,12 @@ CAP_PREFIX = "am_cap_"    # node.name of the loopback capture side we link into
 # Software gain allows boost above unity (PipeWire amplifies at volume > 1).
 GAIN_MAX = 4.0            # per-channel cap (~+12 dB)
 VOL_MAX = 8.0             # final (channel × master) cap (~+18 dB), safety limit
+
+# Node naming. A "strip" (input channel) is a HIDDEN Stream/Output node; a "bus"
+# is the Audio/Source apps actually select. Strips are summed into a bus capture.
+STRIP_PREFIX = "am_strip_"      # per-strip hidden Stream/Output (post per-strip gain)
+BUS_PREFIX = "am_bus_"          # per-bus Audio/Source (what apps record)
+BUSCAP_PREFIX = "am_buscap_"    # per-bus capture (Stream/Input) we feed strips into
 
 
 def _run(cmd, timeout=8):
@@ -75,8 +82,9 @@ def list_devices() -> list[dict]:
         pr = o.get("info", {}).get("props", {})
         name = pr.get("node.name", "")
         mc = pr.get("media.class", "")
-        if name.startswith(VIRT_PREFIX) or name.startswith(CAP_PREFIX):
-            continue  # one of ours
+        if name.startswith((VIRT_PREFIX, CAP_PREFIX,
+                            STRIP_PREFIX, BUS_PREFIX, BUSCAP_PREFIX)):
+            continue  # one of ours (incl. buses — never offer them as inputs)
         if mc == "Audio/Source":
             kind = "source"
         elif mc == "Audio/Sink":
@@ -184,7 +192,7 @@ class Channel:
     def __init__(self, cid: int, name: str, device: str, port: str,
                  src_label: str, port_label: str, gain: float = 0.75):
         self.id = cid
-        self.mic_id = f"{VIRT_PREFIX}{cid}"
+        self.mic_id = f"{STRIP_PREFIX}{cid}"   # hidden Stream/Output (summed into a bus)
         self.cap_node = f"{CAP_PREFIX}{cid}"
         self.name = name
         self.device = device          # source node.name we record/route from
@@ -208,6 +216,7 @@ class Channel:
         self.solo = False        # solo = keep audible; silences non-soloed channels
         self.muted_by_solo = False  # transient: another channel is soloed, this one isn't
         self.route_ok = True     # is the source device port currently present?
+        self.bus_id: int | None = None   # id of the Bus this strip feeds (None = not routed = silent)
 
     # -- lifecycle -------------------------------------------------------- #
     def start(self) -> None:
@@ -219,9 +228,11 @@ class Channel:
             # so every channel — especially monitor channels — would carry the
             # microphone mixed in on top of the port we explicitly link.
             f"--capture-props=node.name={self.cap_node} node.autoconnect=false",
+            # Hidden Stream/Output (no media.class, autoconnect=false): apps don't
+            # list it as a mic — only buses are app-visible. We link its output
+            # into the assigned bus's capture (see route_to).
             "--playback-props="
-            f"media.class=Audio/Source node.name={self.mic_id} "
-            f"node.description={_quote(self.name)} "
+            f"node.name={self.mic_id} node.autoconnect=false "
             "audio.channels=1 audio.position=[MONO]",
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
            start_new_session=True)   # detach so the node survives a server restart
@@ -311,6 +322,26 @@ class Channel:
         _run(["pw-cli", "set-param", str(self.node_id), "Props",
               f"{{ volume: {vol} }}"])
 
+    # -- routing into a bus ----------------------------------------------- #
+    def route_to(self, bus: "Bus") -> None:
+        """Link this strip's output into a bus's capture (mono → both inputs for
+        full level). Idempotent-ish: pw-link just no-ops if the link exists."""
+        self.bus_id = bus.id
+        src = f"{self.mic_id}:output_MONO"
+        for dst in (f"{bus.cap_node}:input_FL", f"{bus.cap_node}:input_FR"):
+            _link(src, dst)
+
+    def unroute(self, bus: "Bus") -> None:
+        src = f"{self.mic_id}:output_MONO"
+        for dst in (f"{bus.cap_node}:input_FL", f"{bus.cap_node}:input_FR"):
+            _unlink(src, dst)
+        self.bus_id = None
+
+    def bus_links_ok(self, bus: "Bus", links: set) -> bool:
+        """Are this strip's output→bus links present? (for the relinker)."""
+        src = f"{self.mic_id}:output_MONO"
+        return (src, f"{bus.cap_node}:input_FL") in links
+
     # -- serialisation ---------------------------------------------------- #
     def to_dict(self) -> dict:
         return {
@@ -330,6 +361,7 @@ class Channel:
             "gate_hyst": round(self.gate_hyst, 2),
             "muted": self.muted,
             "solo": self.solo,
+            "bus_id": self.bus_id,
         }
 
     @classmethod
@@ -345,7 +377,196 @@ class Channel:
         ch.gate_hyst = float(d.get("gate_hyst", ch.gate_hyst))
         ch.muted = bool(d.get("muted", False))
         ch.solo = bool(d.get("solo", False))
+        ch.bus_id = d.get("bus_id", None)
         return ch
+
+
+class Bus:
+    """An output bus = one virtual microphone apps select. A pw-loopback whose
+    playback is an Audio/Source (am_bus_<id>); strips are summed into its capture
+    (am_buscap_<id>). Master gain is applied here (the final output)."""
+
+    def __init__(self, bid: int, name: str, gain: float = 1.0):
+        self.id = bid
+        self.source_node = f"{BUS_PREFIX}{bid}"     # Audio/Source apps select
+        self.cap_node = f"{BUSCAP_PREFIX}{bid}"     # capture we feed strips into
+        self.name = name
+        self.gain = gain
+        self.muted = False
+        self.solo = False
+        self.muted_by_solo = False
+        self.active = True
+        self.proc: subprocess.Popen | None = None
+        self.node_id: int | None = None
+
+    def start(self) -> None:
+        self.proc = subprocess.Popen([
+            "pw-loopback",
+            f"--capture-props=node.name={self.cap_node} node.autoconnect=false",
+            "--playback-props="
+            f"media.class=Audio/Source node.name={self.source_node} "
+            f"node.description={_quote(self.name)} "
+            "audio.channels=1 audio.position=[MONO]",
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+           start_new_session=True)
+        _capture_ready(self.cap_node)
+        self.active = True
+        self._resolve_and_apply_gain()
+
+    def adopt(self, master: float = 1.0) -> None:
+        self.proc = None
+        self.active = True
+        self.node_id = node_id(self.source_node)
+        self._apply_gain(master)
+
+    def is_alive(self) -> bool:
+        if self.proc is not None:
+            return self.proc.poll() is None
+        return node_id(self.source_node) is not None
+
+    def stop(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        else:
+            _kill_loopback(self.cap_node)
+        self.proc = None
+        self.active = False
+
+    def rename(self, name: str) -> None:
+        self.name = name   # node.description isn't live-editable; reflected on next start
+
+    def set_gain(self, gain: float, master: float = 1.0) -> None:
+        self.gain = max(0.0, min(GAIN_MAX, gain))
+        self._apply_gain(master)
+
+    def _resolve_and_apply_gain(self, master: float = 1.0) -> None:
+        for _ in range(20):
+            self.node_id = node_id(self.source_node)
+            if self.node_id is not None:
+                break
+            time.sleep(0.1)
+        self._apply_gain(master)
+
+    def _apply_gain(self, master: float = 1.0) -> None:
+        if self.node_id is None:
+            self.node_id = node_id(self.source_node)
+        if self.node_id is None:
+            return
+        silent = self.muted or self.muted_by_solo
+        vol = 0.0 if silent else round(max(0.0, min(VOL_MAX, self.gain * master)), 4)
+        _run(["pw-cli", "set-param", str(self.node_id), "Props",
+              f"{{ volume: {vol} }}"])
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "gain": round(self.gain, 4),
+                "muted": self.muted, "solo": self.solo, "active": self.active}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Bus":
+        b = cls(d["id"], d.get("name", f"Bus {d['id']}"), d.get("gain", 1.0))
+        b.active = d.get("active", True)
+        b.muted = bool(d.get("muted", False))
+        b.solo = bool(d.get("solo", False))
+        return b
+
+
+# --------------------------------------------------------------------------- #
+# Sound-card profiles — "Event mode" (Pro Audio)
+# A card must be in its pro-audio ALSA profile to expose each channel as its own
+# port. We read profiles via `pactl list cards` (forced to C locale for stable
+# field labels) and switch with `pactl set-card-profile`.
+# --------------------------------------------------------------------------- #
+PRO_PROFILE = "pro-audio"
+
+
+def _pactl(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(["pactl", *args], capture_output=True, text=True,
+                          timeout=6, env={**os.environ, "LC_ALL": "C"})
+
+
+def list_cards() -> list[dict]:
+    """ALSA cards: {name, active_profile, has_pro, profiles[]}."""
+    try:
+        out = _pactl(["list", "cards"]).stdout
+    except Exception:
+        return []
+    import re
+    cards, cur, in_profiles = [], None, False
+    for ln in out.splitlines():
+        if ln.startswith("Card #"):
+            if cur:
+                cards.append(cur)
+            cur = {"name": "", "label": "", "active_profile": "", "has_pro": False,
+                   "inputs": False, "profiles": []}
+            in_profiles = False
+        elif cur is None:
+            continue
+        elif ln.startswith("\tName:"):
+            cur["name"] = ln.split(":", 1)[1].strip()
+        elif ln.startswith("\tActive Profile:"):
+            cur["active_profile"] = ln.split(":", 1)[1].strip()
+            in_profiles = False
+        elif ln.strip().startswith("device.description = "):
+            cur["label"] = ln.split("=", 1)[1].strip().strip('"')
+        elif ln.strip() == "Profiles:":
+            in_profiles = True
+        elif ln.startswith("\t") and not ln.startswith("\t\t"):
+            in_profiles = False        # a new single-tab section (Ports:, Active Profile:, …)
+        elif in_profiles and ln.startswith("\t\t"):
+            key = ln.strip().split(":", 1)[0].strip()
+            if key:
+                cur["profiles"].append(key)
+                if key == PRO_PROFILE:
+                    cur["has_pro"] = True
+                    m = re.search(r"sources:\s*(\d+)", ln)   # does pro-audio expose inputs?
+                    if m and int(m.group(1)) > 0:
+                        cur["inputs"] = True
+    if cur:
+        cards.append(cur)
+    return [c for c in cards if c["name"]]
+
+
+def card_profile(card: str) -> str:
+    """Live active-profile name of a card (empty if not found)."""
+    for c in list_cards():
+        if c["name"] == card:
+            return c["active_profile"]
+    return ""
+
+
+def set_card_profile(card: str, profile: str) -> bool:
+    try:
+        return _pactl(["set-card-profile", card, profile]).returncode == 0
+    except Exception:
+        return False
+
+
+def card_for_device(device: str) -> str:
+    """Map a channel's device node (e.g. alsa_input.pci-0000_04_00.6.HiFi__…) to
+    its alsa_card.* by matching the bus token after the 'alsa_card.' prefix."""
+    for c in list_cards():
+        bus = c["name"].split("alsa_card.", 1)[-1]
+        if bus and bus in device:
+            return c["name"]
+    return ""
+
+
+def fallback_profile(card: str) -> str:
+    """A sane non-pro profile to restore to when we have no saved original."""
+    for c in list_cards():
+        if c["name"] != card:
+            continue
+        prof = [p for p in c["profiles"] if p not in (PRO_PROFILE, "off")]
+        for pref in ("hifi", "analog-stereo+input", "duplex", "analog"):
+            for p in prof:
+                if pref in p.lower():
+                    return p
+        return prof[0] if prof else ""
+    return ""
 
 
 def _quote(text: str) -> str:
@@ -359,15 +580,20 @@ def _quote(text: str) -> str:
     return f'"{cleaned}"'
 
 
-def existing_mic_nodes() -> set[str]:
-    """Set of our virtual-mic node names (am_mic_*) currently present in PipeWire."""
+def _nodes_with_prefix(prefix: str) -> set[str]:
     data = json.loads(_run(["pw-dump", "Node"]).stdout)
-    out = set()
-    for o in data:
-        nm = o.get("info", {}).get("props", {}).get("node.name", "")
-        if nm.startswith(VIRT_PREFIX):
-            out.add(nm)
-    return out
+    return {nm for o in data
+            if (nm := o.get("info", {}).get("props", {}).get("node.name", "")).startswith(prefix)}
+
+
+def existing_mic_nodes() -> set[str]:
+    """Our strip output node names (am_strip_*) currently present in PipeWire."""
+    return _nodes_with_prefix(STRIP_PREFIX)
+
+
+def existing_bus_nodes() -> set[str]:
+    """Our bus source node names (am_bus_*) currently present in PipeWire."""
+    return _nodes_with_prefix(BUS_PREFIX)
 
 
 def _kill_loopback(name: str) -> None:
@@ -400,7 +626,8 @@ def cleanup_orphans(keep: set[str] | None = None) -> None:
         if len(parts) != 2:
             continue
         pid_str, cmd = parts
-        if CAP_PREFIX not in cmd and VIRT_PREFIX not in cmd:
+        if not any(p in cmd for p in (CAP_PREFIX, VIRT_PREFIX,
+                                      STRIP_PREFIX, BUS_PREFIX, BUSCAP_PREFIX)):
             continue
         if any(name in cmd for name in keep):
             continue   # one we want to adopt — leave it alive
