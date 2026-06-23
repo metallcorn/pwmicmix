@@ -372,14 +372,17 @@ function makeChannel(ch) {
       </div>
       <div class="knob-wrap"><button class="ng-gear" title="Gate settings" onclick="openNgCfg(event,'${ch.mic_id}')">${GEAR_ICON}</button><div class="gate-knob off" id="knob_${ch.mic_id}" title="Noise gate threshold — drag / wheel / [ ]"><i></i></div><span class="knob-lbl" id="ngval_${ch.mic_id}">NG</span></div>
     </div>
-    <div class="bus-chip-wrap"><button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" title="${ch.bus_id != null ? esc((buses.find((b) => b.id === ch.bus_id) || {}).name || '') : 'Patch to a virtual mic'}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button>${ch.bus_id != null ? `<button class="chip-x" title="Unpatch from bus" onclick="unpatch('${ch.mic_id}')">✕</button>` : ''}</div>
+    <div class="bus-chip-wrap">
+      <div class="chip-head"><span class="chip-lbl">vmic out</span>${ch.bus_id != null ? `<button class="chip-x" title="Unpatch from bus" onclick="unpatch('${ch.mic_id}')">✕</button>` : ''}</div>
+      <button class="bus-chip ${ch.bus_id != null ? '' : 'unrouted'} ${patchMic === ch.mic_id ? 'patching' : ''}" id="chip_${ch.mic_id}" title="${ch.bus_id != null ? esc((buses.find((b) => b.id === ch.bus_id) || {}).name || '') : 'Patch to a virtual mic'}" onclick="startPatch('${ch.mic_id}')">${chipHtml(ch)}</button>
+    </div>
     <div class="ch-foot">
       <span class="badge ${s === 'ok' ? 'ok' : 'off'}" id="badge_${ch.mic_id}">${badge[s]}</span>
-      <div class="foot-ctl">
-        <button class="lockbtn${linked.has(ch.mic_id) ? ' on' : ''}" id="lock_${ch.mic_id}" title="Link faders to move together (L)" onclick="toggleLink('${ch.mic_id}')">${LINK_ICON}</button>
-        <button class="solobtn${ch.solo ? ' on' : ''}" id="solo_${ch.mic_id}" title="Solo (S) — hear only soloed channels; clears mute" onclick="toggleSolo('${ch.mic_id}')">S</button>
-        <button class="mutebtn${ch.muted ? ' on' : ''}" id="mute_${ch.mic_id}" title="Mute (M)" onclick="toggleMute('${ch.mic_id}')">M</button>
-      </div>
+      <button class="lockbtn${linked.has(ch.mic_id) ? ' on' : ''}" id="lock_${ch.mic_id}" title="Link faders to move together (L)" onclick="toggleLink('${ch.mic_id}')">${LINK_ICON}</button>
+    </div>
+    <div class="foot-sm">
+      <button class="solobtn${ch.solo ? ' on' : ''}" id="solo_${ch.mic_id}" title="Solo (S) — hear only soloed channels; clears mute" onclick="toggleSolo('${ch.mic_id}')">S</button>
+      <button class="mutebtn${ch.muted ? ' on' : ''}" id="mute_${ch.mic_id}" title="Mute (M)" onclick="toggleMute('${ch.mic_id}')">M</button>
     </div>`;
   faderPrev[ch.mic_id] = gainToSlider(ch.gain);
   const f = d.querySelector('#fader_' + cssEsc(ch.mic_id));

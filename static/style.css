@@ -519,11 +519,14 @@ body.patching .bus{cursor:pointer;border-left-width:5px}
 body.patching .bus:hover{background:linear-gradient(180deg,#1d2b2b,#141b1a)}
 body.patching .bus::after{content:"tap to patch";margin-left:auto;font-size:10px;color:var(--bc,#46e6c8);opacity:.8}
 /* strip → bus chip */
-.bus-chip-wrap{display:flex;gap:4px;align-items:stretch;width:100%;padding:0 8px 6px}
+.bus-chip-wrap{display:flex;flex-direction:column;gap:3px;width:100%;padding:2px 8px 4px}
+.chip-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-height:11px}
+.chip-lbl{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:var(--txt-faint);line-height:1}
+.foot-sm{display:flex;justify-content:center;gap:10px;padding:0 8px 10px}
 .chip-x{flex:0 0 auto;border:0.5px solid var(--line-2);background:rgba(255,255,255,.03);color:var(--txt-faint);
   border-radius:7px;padding:0 7px;font-size:10px;cursor:pointer}
 .chip-x:hover{background:rgba(255,90,90,.14);color:var(--red);border-color:rgba(255,90,90,.35)}
-.bus-chip{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;
+.bus-chip{width:100%;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;
   font:600 10px var(--font-sans);border:0.5px solid var(--line-2);background:rgba(255,255,255,.03);
   color:var(--txt-mut);border-radius:7px;padding:4px 6px;cursor:pointer;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
