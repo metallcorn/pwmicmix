@@ -8,10 +8,11 @@ don't re-learn them painfully.
 
 A web-based mixing console for **PipeWire** on Linux. It takes channels of real
 audio devices (e.g. individual USB sends of a Behringer WING, or a webcam mic)
-and exposes each as its own **virtual microphone** (`Audio/Source`) that apps
-(Chrome, OBS, Zoom…) can select. It shows live VU meters, faders (with boost),
-routing, and a wizard to add channels. Dark, adaptive UI (English), reachable
-from a phone on the LAN with a PIN.
+as **strips**, and lets you route (patch) them into **buses** — each bus is a
+**virtual microphone** (`Audio/Source`) that apps (Chrome, OBS, Zoom…) can
+select. Many strips can feed one bus (a submix). It shows live VU meters, faders
+(with boost), a patchbay, and a wizard to add channels. Dark, adaptive UI
+(English), reachable from a phone on the LAN with a PIN.
 
 ## Run / stop
 
@@ -40,50 +41,77 @@ artifact only, real GPU browsers show full contrast.
 
 | File | Role |
 |------|------|
-| `app.py` | Flask API, `Mixer` state, persistence (`state.json`/`presets.json`), restore+adopt, PIN auth, relinker thread, **gate loop**, signal handling |
-| `pipewire.py` | All PipeWire interaction: device discovery, `Channel` (create/adopt/remove/reassign, gain, **mute, gate params + envelope**), link graph, orphan cleanup |
-| `levels.py` | `LevelMonitor` (per-mic RMS), `ProbeMonitor` (wizard equaliser), `GateMonitor` (per-mic PRE-gain detectors for the gate) — all via explicit-link `pw-record` |
+| `app.py` | Flask API, `Mixer` state (strips **and** buses), persistence (`state.json`/`presets.json`/`event_mode.json`), restore+adopt+re-route, PIN auth, relinker thread, **gate loop**, Event mode, signal handling |
+| `pipewire.py` | All PipeWire interaction: device discovery, `Channel` (a **strip**: create/adopt/remove/reassign, gain, mute, gate, `route_to`/`unroute`), `Bus` (create/adopt/remove/gain/mute/solo), card profiles (Event mode), link graph, orphan cleanup |
+| `levels.py` | `LevelMonitor` (per-node RMS — used for both strips PRE-gain and buses), `ProbeMonitor` (wizard equaliser), `GateMonitor` (per-strip PRE-gain detectors for the gate) — all via explicit-link `pw-record` |
 | `static/index.html` `style.css` `app.js` | Frontend (adaptive console, login, wizard, meters, faders, mute, noise-gate + settings popup, link, align, presets, hotkeys, help) |
 | `static/test.html` | Standalone page to test a mic in Chrome with audio-processing toggles |
 | `test_app.py` | Functional tests: controls→node volume + noise-gate dynamics (`/.venv/bin/python test_app.py`) |
 | `run.sh` `requirements.txt` | venv bootstrap + deps |
 | `desktop.py` | Windowed entrypoint for the packaged build: runs Flask in a thread, shows the UI in a native **pywebview + Qt WebEngine** window; single-instance attach; close = quit |
 | `packaging/` | AppImage build: `build-appimage.sh`, `trim-qt.sh`, `AppRun`, `AudioMixer.desktop`, `icon.svg`/`icon.png` |
-| `state.json` / `presets.json` | Persisted channels+master / scene presets (runtime) |
+| `state.json` / `presets.json` / `event_mode.json` | Persisted strips+buses+master / scene presets / Event-mode card→profile (all runtime, gitignored) |
 | `mock.html` `tz.txt` | Original design mock + spec (Russian) |
 
 ## Architecture
 
+> **Strips → buses (current model).** An input **channel** is now a *strip* — a
+> HIDDEN node apps can't select. Apps select **buses**. Strips are patched
+> (routed) into a bus, and the bus is the virtual mic. This replaced the old
+> "one channel = one `am_mic_<id>` source" model. `am_mic_*` no longer exists.
+
 ```
-Hardware device (e.g. WING USB send)  --pw-link-->  am_cap_<id> (loopback capture, autoconnect=false)
-                                                        |  (loopback copies)
-                                                        v
-                                              am_mic_<id> (Audio/Source)  <-- apps record this
-                                                        ^
-                                              pw-record (LevelMonitor)  --> RMS --> /api/levels
+Hardware port  --pw-link-->  am_cap_<id> (loopback capture, autoconnect=false)
+                                   |  (loopback copies)
+                                   v
+                          am_strip_<id>  ── HIDDEN Stream/Output (no media.class)
+                          (per-strip gain×master×gate)   apps DON'T see this
+                                   |  route_to(): output_MONO --pw-link--> both bus inputs
+                                   v
+                          am_buscap_<id> (bus loopback capture, autoconnect=false)
+                                   |  (loopback copies)
+                                   v
+                          am_bus_<id> (Audio/Source, per-bus gain)  <-- apps record this
 ```
 
-- Each **channel** = one `pw-loopback`: capture side `am_cap_<id>` (we link the
-  chosen device port into it), playback side `am_mic_<id>` (mono `Audio/Source`).
-- **Applied volume** = `gain × master × gate_level` (or **0** if `muted` or
-  `master_muted`), set as `Props { volume }` on `am_mic` via `pw-cli set-param`.
-  volume > 1 amplifies (boost), capped at `GAIN_MAX` (+12 dB) / `VOL_MAX`.
-  `Mixer.eff_master()` returns 0 when master-muted; **all apply paths use it**.
-- **Levels** = a `pw-record` per active mic reading raw PCM; RMS computed in a
-  thread; `/api/levels` polled every 80 ms. The frontend maps RMS→% on a dB scale
-  with makeup gain (`rmsToPct`), fast-attack/slow-release ballistics.
-- **Noise gate** (per channel): a separate PRE-gain `pw-record` detector
+- **Strip** = one `pw-loopback`: capture `am_cap_<id>` (we link the chosen device
+  port into it), playback `am_strip_<id>` — a **hidden** Stream/Output (no
+  `media.class`, `autoconnect=false`) so apps don't list it as a mic. `pipewire.Channel`.
+- **Bus** = one `pw-loopback`: capture `am_buscap_<id>` (strips are summed into it),
+  playback `am_bus_<id>` (mono `Audio/Source`, this is what apps record). `pipewire.Bus`.
+  Many strips → one bus; a strip with `bus_id == None` is **unrouted = silent**.
+  Buses: create/remove/rename + per-bus gain/mute/solo (`/api/buses`, `/api/bus_*`).
+- **Routing**: `Strip.route_to(bus)` links `am_strip_<id>:output_MONO` into the
+  bus's `input_FL`+`input_FR` (mono → both, full level); `unroute` unlinks. The
+  patchbay UI (click-to-patch, color markers, unpatch ✕) drives `/api/route`.
+- **Applied volume — two stages.** *Strip* volume = `gain × master × gate_level`
+  (**0** if `muted`/solo-silenced), on `am_strip`. *Bus* volume = `bus.gain`
+  (**0** if bus muted/solo-silenced), on `am_bus`. **Master is applied on strips,
+  not buses** (despite a stale comment on `Bus`). `Mixer.eff_master()` returns 0
+  when master-muted; strip apply paths use it. Boost capped at `GAIN_MAX` (+12 dB).
+- **Levels** = two `pw-record` monitors: `strip_mon` reads each strip **PRE-gain**
+  (keyed by `am_strip_*` → shown on channel meters) and `monitor` reads each bus
+  (keyed by `am_bus_*`); master level = max over buses. `/api/levels` polled every
+  80 ms; frontend maps RMS→% on a dB scale (`rmsToPct`), fast-attack/slow-release.
+- **Noise gate** (per strip): a separate PRE-gain `pw-record` detector
   (`GateMonitor`, explicit-link, like the probe) feeds `Mixer._gate_loop` (50 ms),
   which decides open/close (threshold + hysteresis + hold) and ramps the
   `gate_level` envelope (attack/release). Threshold is compared in pre-gain terms
   (`gate / (gain×master)`) because the meter the user sets it against is post-gain.
-  Per-channel params: `gate`, `gate_attack`, `gate_hold`, `gate_release`,
-  `gate_hyst` — persisted and in presets.
+  Per-strip params: `gate`, `gate_attack`, `gate_hold`, `gate_release`,
+  `gate_hyst` — persisted and in presets. **Buses have no gate.**
 - **Relinker thread** (1.5 s) restores device→capture links after replug, recreates
-  a dead loopback, and sets `ch.route_ok` (→ "no_route" vs "no_signal/silent").
-- **Persistence/adoption**: loopbacks are started detached (`start_new_session`),
-  NOT killed on server shutdown; on startup `restore()` adopts surviving
-  `am_mic_*` nodes (same PipeWire object) instead of recreating them.
+  a dead strip/bus loopback, re-establishes strip→bus links, and sets `ch.route_ok`
+  (→ "no_route" vs "no_signal/silent").
+- **Persistence/adoption**: strip+bus loopbacks are started detached
+  (`start_new_session`), NOT killed on server shutdown; on startup `restore()`
+  adopts surviving `am_bus_*`/`am_strip_*` nodes (same PipeWire object) instead of
+  recreating them, then re-routes strips to their buses. Old single-source state
+  migrates: a strip with no/invalid bus gets its own 1:1 bus (old behavior).
+- **Event mode** (Pro Audio): per sound-card, switch the card profile to a
+  Pro-Audio one to expose raw channels, restoring the original profile on exit.
+  State (`card → profile to restore`) persists in `event_mode.json`; crash-safe
+  restore on startup. `/api/cards`, `/api/event_mode`.
 - **Presets** (scenes): full mix snapshot (gain/mute/gate+params/master/links),
   versioned (`v`) for forward/backward compat; stored in localStorage AND
   `presets.json` (`/api/presets`). Apply glides faders + NG smoothly.
@@ -100,7 +128,7 @@ Hardware device (e.g. WING USB send)  --pw-link-->  am_cap_<id> (loopback captur
    speaker-monitor probe). For the wizard probe we therefore start the recorder
    with `node.autoconnect=false` + a fixed `node.name` and **explicitly `pw-link`**
    only the wanted device ports. (See `levels._ProbeMeter`.) Targeting the
-   real `am_mic_*` source nodes by name DOES work (they're unique real nodes).
+   real `am_strip_*` / `am_bus_*` nodes by name DOES work (they're unique real nodes).
 
 3. **`node.autoconnect=false` on the loopback capture side is essential.**
    Without it WirePlumber auto-links the capture to the **default mic**, so every
@@ -122,9 +150,10 @@ Hardware device (e.g. WING USB send)  --pw-link-->  am_cap_<id> (loopback captur
 7. **Chrome captures via the PipeWire-Pulse layer** and its WebRTC audio
    processing (noise suppression / AGC / echo cancel) can gate non-voice/system
    audio to silence ~1 s in. That's app-side, not our bug — `static/test.html`
-   lets you verify with processing off. Also: if a mic node is destroyed and
-   recreated, Chrome keeps the stale handle and gets noise until re-selected —
-   which is why we persist/adopt nodes across restarts (#persistence).
+   lets you verify with processing off. Also: if a bus node (`am_bus_*`, the
+   source apps hold) is destroyed and recreated, Chrome keeps the stale handle
+   and gets noise until re-selected — which is why we persist/adopt nodes across
+   restarts (#persistence).
 
 8. **Shell footgun:** `pkill -f <pattern>` / `pgrep -f <pattern>` will match the
    wrapping shell command itself if the pattern appears in your command line →
@@ -181,9 +210,9 @@ effective width).
 ## Testing PipeWire logic safely
 
 The user's live server runs on 8723 with real channels — don't disrupt it. Test
-`pipewire.Channel` logic directly with a throwaway high id (e.g. 9100) via the
-`.venv` python, and clean up (`ch.stop()`); verify with `pw-dump Node` /
-`pw-link -l`. Don't fight the port.
+`pipewire.Channel` (strip) / `pipewire.Bus` logic directly with a throwaway high
+id (e.g. 9100) via the `.venv` python, and clean up (`ch.stop()` / `bus.stop()`);
+verify with `pw-dump Node` / `pw-link -l`. Don't fight the port.
 
 ## Packaging (AppImage)
 
@@ -202,7 +231,9 @@ loaded into context every turn). Quick UI check without a browser:
 
 ## Conventions
 
-- Node names: `am_mic_<id>` (the source apps see), `am_cap_<id>` (loopback capture).
+- Node names: `am_bus_<id>` (Audio/Source apps see), `am_buscap_<id>` (bus
+  loopback capture), `am_strip_<id>` (hidden per-strip Stream/Output),
+  `am_cap_<id>` (per-strip loopback capture). (No more `am_mic_*`.)
 - Comments: concise, explain the *why* (especially the gotchas above).
 - Keep the UI English; the spec/mock and user comms are Russian.
 - See `BACKLOG.md` for deferred ideas (master→meter coupling, long peak-hold,

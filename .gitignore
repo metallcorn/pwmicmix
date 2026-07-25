@@ -7,6 +7,7 @@ venv/
 # Per-user runtime state (not source)
 state.json
 presets.json
+event_mode.json
 
 # Build artifacts (huge — never commit; GitHub rejects >100MB)
 build/
